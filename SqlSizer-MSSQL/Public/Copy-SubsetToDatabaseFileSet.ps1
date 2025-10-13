@@ -28,7 +28,7 @@ function Copy-SubsetToDatabaseFileSet
     foreach ($table in $subsetTables)
     {
         $tmpFile = New-TemporaryFile
-        $csv = Get-SubsetTableJson -SessionId $SessionId -Database $Database -SchemaName $table.SchemaName -TableName $table.TableName -ConnectionInfo $ConnectionInfo `
+        $csv = Get-SubsetTableJson -SessionId $SessionId -Database $SourceDatabase -SchemaName $table.SchemaName -TableName $table.TableName -ConnectionInfo $ConnectionInfo `
                                     -Secure $Secure -DatabaseInfo $DatabaseInfo
 
         [System.IO.File]::WriteAllText($tmpFile.FullName, $csv, [Text.Encoding]::GetEncoding("utf-8"))

@@ -17,7 +17,7 @@ function New-EmptyCompactDatabase
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ((Test-DatabaseOnline -Database $NewDatabase -ConnectionInfo $connection))
+    if ((Test-DatabaseOnline -Database $NewDatabase -ConnectionInfo $ConnectionInfo))
     {
         return $false
     }
