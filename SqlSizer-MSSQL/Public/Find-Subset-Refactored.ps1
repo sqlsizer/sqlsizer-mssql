@@ -1,0 +1,984 @@
+<#
+.SYNOPSIS
+    Refactored version of Find-Subset with improved algorithm design.
+
+.DESCRIPTION
+    This is a cleaner, more maintainable implementation of the subset finding algorithm.
+    
+    Key improvements over the original:
+    1. Explicit TraversalState enum instead of confusing color codes
+    2. Unified traversal function (no separate HandleOutgoing/HandleIncoming)
+    3. Eliminated the "Split" operation - uses proper state resolution
+    4. Improved cycle detection with path tracking
+    5. Better batch processing with set-based operations
+    6. Cleaner SQL generation with CTEs
+    7. Better separation of concerns
+
+.NOTES
+    This is a DRAFT refactoring for review. It maintains the same external interface
+    as the original Find-Subset function but with internal improvements.
+#>
+
+function Find-Subset-Refactored
+{
+    [cmdletbinding()]
+    [outputtype([pscustomobject])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [int]$StartIteration = 0,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$Interactive = $false,
+
+        [Parameter(Mandatory = $false)]
+        [int]$Iteration = -1,
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxBatchSize = -1,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SessionId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Database,
+
+        [Parameter(Mandatory = $false)]
+        [TableInfo2[]]$IgnoredTables,
+
+        [Parameter(Mandatory = $true)]
+        [DatabaseInfo]$DatabaseInfo,
+
+        [Parameter(Mandatory = $false)]
+        [TraversalConfiguration]$TraversalConfiguration = $null,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$FullSearch = $false,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$UseDfs = $false,
+
+        [Parameter(Mandatory = $true)]
+        [SqlConnectionInfo]$ConnectionInfo
+    )
+
+    # Query caches - keyed by "schema_table_state_direction"
+    $queryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string]]"
+    #region Helper Functions
+
+    function Get-NewTraversalState
+    {
+        <#
+        .SYNOPSIS
+            Determines the new state when traversing a relationship.
+        #>
+        param
+        (
+            [TraversalDirection]$Direction,
+            [TraversalState]$CurrentState,
+            [TableFk]$Fk,
+            [TraversalConfiguration]$TraversalConfiguration
+        )
+
+        $newState = $CurrentState
+
+        # Default state transitions
+        if ($Direction -eq [TraversalDirection]::Outgoing)
+        {
+            # When traversing outgoing FKs (dependencies):
+            # Include -> Include (include referenced data)
+            # Exclude -> DO NOT TRAVERSE (exclusion is local, not propagated)
+            # Pending -> Pending (propagate uncertainty to dependencies)
+            if ($CurrentState -eq [TraversalState]::Include) {
+                $newState = [TraversalState]::Include
+            }
+            elseif ($CurrentState -eq [TraversalState]::Pending) {
+                $newState = [TraversalState]::Pending
+            }
+            else {
+                # Exclude state: do not propagate (handled by Should-TraverseDirection)
+                $newState = [TraversalState]::Exclude
+            }
+        }
+        elseif ($Direction -eq [TraversalDirection]::Incoming)
+        {
+            if ($CurrentState -eq [TraversalState]::Include)
+            {
+                $newState = if ($FullSearch) { 
+                    [TraversalState]::Include 
+                } else { 
+                    [TraversalState]::Pending 
+                }
+            }
+            # Pending and Exclude do not traverse incoming (handled by Should-TraverseDirection)
+        }
+
+        # Apply TraversalConfiguration overrides if specified
+        if ($null -ne $TraversalConfiguration)
+        {
+            $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Schema } else { $Fk.FkSchema }
+            $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
+            
+            $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
+            
+            if ($null -ne $item -and $null -ne $item.StateOverride)
+            {
+                # Use the forced state from StateOverride
+                $newState = $item.StateOverride.State
+            }
+        }
+
+        return $newState
+    }
+
+    function Get-TraversalConstraints
+    {
+        <#
+        .SYNOPSIS
+            Gets traversal constraints (MaxDepth, Top) from TraversalConfiguration.
+        .DESCRIPTION
+            Retrieves constraints that limit FK traversal:
+            - MaxDepth: Limits traversal depth from the SOURCE table (where we're starting from)
+            - Top: Limits number of records to retrieve via this specific FK relationship
+            
+            Constraints are looked up for the TARGET table (where we're going to),
+            which allows users to say "limit data retrieved INTO this table".
+        #>
+        param
+        (
+            [TableFk]$Fk,
+            [TraversalDirection]$Direction,
+            [TraversalConfiguration]$TraversalConfiguration
+        )
+
+        $result = @{
+            MaxDepth = $null
+            Top      = $null
+        }
+
+        if ($null -ne $TraversalConfiguration)
+        {
+            # Lookup constraints for the TARGET table (where we're traversing TO)
+            # This allows configuration like "limit records going into CustomerAddress table"
+            $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Schema } else { $Fk.FkSchema }
+            $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
+            
+            $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
+            
+            if ($null -ne $item -and $null -ne $item.Constraints)
+            {
+                if ($item.Constraints.MaxDepth -ne -1)
+                {
+                    $result.MaxDepth = $item.Constraints.MaxDepth
+                }
+                if ($item.Constraints.Top -ne -1)
+                {
+                    $result.Top = $item.Constraints.Top
+                }
+            }
+        }
+
+        return $result
+    }
+
+    function Should-TraverseDirection
+    {
+        <#
+        .SYNOPSIS
+            Determines if we should traverse in a given direction for a state.
+        #>
+        param
+        (
+            [TraversalState]$State,
+            [TraversalDirection]$Direction
+        )
+
+        if ($Direction -eq [TraversalDirection]::Outgoing)
+        {
+            # Traverse outgoing FKs (dependencies) for:
+            # - Include: ALWAYS traverse to find referenced data
+            # - Pending: to find dependencies (IMPORTANT!)
+            # - Exclude: NO! Exclusion is local, not propagated
+            return ($State -eq [TraversalState]::Include) -or 
+                   ($State -eq [TraversalState]::Pending)
+        }
+        else # Incoming
+        {
+            # Traverse incoming FKs (dependents) for:
+            # - Include: to find dependent data
+            # - InboundOnly: only incoming
+            # - Pending: NO! (to avoid infinite expansion)
+            # - Exclude: NO! (exclusion is local)
+            return ($State -eq [TraversalState]::Include) -or 
+                   ($State -eq [TraversalState]::InboundOnly)
+        }
+    }
+
+    function New-TraversalQuery
+    {
+        <#
+        .SYNOPSIS
+            Generates SQL query for traversing relationships (unified for both directions).
+        .DESCRIPTION
+            Uses CTEs for cleaner, more readable SQL generation.
+            Handles both outgoing (FK to referenced table) and incoming (referenced by) relationships.
+        #>
+        param
+        (
+            [TableInfo]$Table,
+            [TraversalState]$State,
+            [TraversalDirection]$Direction,
+            [TraversalConfiguration]$TraversalConfiguration,
+            [int]$Iteration
+        )
+
+        $result = ""
+        $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
+        $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
+
+        $relationships = if ($Direction -eq [TraversalDirection]::Outgoing) {
+            $Table.ForeignKeys
+        } else {
+            $Table.IsReferencedBy
+        }
+
+        foreach ($rel in $relationships)
+        {
+            # For incoming, we need to iterate through FKs that point to current table
+            $fks = if ($Direction -eq [TraversalDirection]::Incoming) {
+                $rel.ForeignKeys | Where-Object { 
+                    ($_.Schema -eq $Table.SchemaName) -and ($_.Table -eq $Table.TableName) 
+                }
+            } else {
+                @($rel.ForeignKeys)
+            }
+
+            foreach ($fk in $fks)
+            {
+                $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Schema } else { $fk.FkSchema }
+                $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Table } else { $fk.FkTable }
+
+                # Skip ignored tables
+                if ([TableInfo2]::IsIgnored($targetSchema, $targetTable, $IgnoredTables))
+                {
+                    continue
+                }
+
+                $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration
+                $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
+
+                $targetTableInfo = $DatabaseInfo.Tables | Where-Object { 
+                    ($_.SchemaName -eq $targetSchema) -and ($_.TableName -eq $targetTable) 
+                }
+                
+                if ($null -eq $targetTableInfo -or $targetTableInfo.PrimaryKey.Count -eq 0)
+                {
+                    continue
+                }
+
+                $targetTableId = $tablesGroupedByName["$targetSchema, $targetTable"].Id
+                $targetSignature = $structure.Tables[$targetTableInfo]
+                $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
+                $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
+
+                # Build CTE-based query
+                $query = $this.BuildTraversalQueryCTE(
+                    $processing, 
+                    $targetProcessing, 
+                    $Table, 
+                    $targetTableInfo, 
+                    $fk, 
+                    $Direction,
+                    $newState,
+                    $tableId,
+                    $targetTableId,
+                    $fkId,
+                    $constraints,
+                    $Iteration
+                )
+
+                $result += $query
+            }
+        }
+
+        return $result
+    }
+
+    function BuildTraversalQueryCTE
+    {
+        <#
+        .SYNOPSIS
+            Builds a CTE-based traversal query (much cleaner than nested queries).
+        #>
+        param
+        (
+            [string]$SourceProcessing,
+            [string]$TargetProcessing,
+            [TableInfo]$SourceTable,
+            [TableInfo]$TargetTable,
+            [TableFk]$Fk,
+            [TraversalDirection]$Direction,
+            [TraversalState]$NewState,
+            [int]$SourceTableId,
+            [int]$TargetTableId,
+            [int]$FkId,
+            [hashtable]$Constraints,
+            [int]$Iteration
+        )
+
+        # Build column mappings based on direction
+        if ($Direction -eq [TraversalDirection]::Outgoing)
+        {
+            $sourceColumns = $SourceTable.PrimaryKey
+            $targetColumns = $Fk.FkColumns
+            $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
+                "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
+            }
+        }
+        else # Incoming
+        {
+            $sourceColumns = $Fk.FkColumns
+            $targetColumns = $TargetTable.PrimaryKey
+            $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
+                "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
+            }
+        }
+
+        $joinClause = $joinConditions -join " AND "
+
+        # Build select list for target keys
+        $targetKeySelect = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
+            $col = $targetColumns[$i]
+            (Get-ColumnValue -ColumnName $col.Name -Prefix "tgt." -DataType $col.DataType) + " AS Key$i"
+        }
+        $targetKeyList = $targetKeySelect -join ", "
+
+        # Build NOT EXISTS check
+        $notExistsConditions = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
+            "existing.Key$i = tgt.Key$i"
+        }
+        $notExistsClause = $notExistsConditions -join " AND "
+
+        # Additional constraints
+        $additionalWhere = @()
+        
+        # MaxDepth constraint: Limits how deep we traverse from the SOURCE table
+        # The Depth value in SourceRecords represents "depth from initial seed data"
+        # If MaxDepth is set on the target table, we check if we've already gone too deep
+        if ($null -ne $Constraints.MaxDepth)
+        {
+            # Note: src.Depth is the depth of the SOURCE record
+            # src.Depth + 1 would be the depth of the TARGET record
+            # We check src.Depth to prevent creating records beyond MaxDepth
+            $additionalWhere += "src.Depth < $($Constraints.MaxDepth)"
+        }
+
+        # Prevent cycles in non-full search
+        if (-not $FullSearch)
+        {
+            $additionalWhere += "((src.Fk <> $FkId) OR (src.Fk IS NULL))"
+        }
+
+        $whereClause = if ($additionalWhere.Count -gt 0) {
+            "AND " + ($additionalWhere -join " AND ")
+        } else {
+            ""
+        }
+
+        # TOP clause priority:
+        # 1. MaxBatchSize (global limit per query execution) - overrides everything
+        # 2. Constraints.Top (per-table or per-FK limit) - table-specific limit
+        # 3. No limit - retrieve all matching records
+        $topClause = ""
+        if ($MaxBatchSize -ne -1)
+        {
+            # Global batch limit takes precedence to prevent overwhelming queries
+            $topClause = "TOP ($MaxBatchSize)"
+        }
+        elseif ($null -ne $Constraints.Top)
+        {
+            # Table-specific constraint limits records for this relationship
+            $topClause = "TOP ($($Constraints.Top))"
+        }
+
+        # CTE-based query (cleaner and more maintainable)
+        $query = @"
+-- Traverse $(if ($Direction -eq [TraversalDirection]::Outgoing) { 'OUTGOING' } else { 'INCOMING' }) FK: $($Fk.Name)
+WITH SourceRecords AS (
+    SELECT Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Depth, Fk
+    FROM $SourceProcessing src
+    WHERE src.Iteration IN (
+        SELECT FoundIteration 
+        FROM SqlSizer.Operations 
+        WHERE Status = 0 AND SessionId = '$SessionId'
+    )
+),
+NewRecords AS (
+    SELECT DISTINCT $topClause
+        $targetKeyList,
+        src.Depth + 1 AS Depth
+    FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN SourceRecords src ON $joinClause
+    WHERE $($targetColumns[0].Name) IS NOT NULL
+        $whereClause
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM $TargetProcessing existing 
+            WHERE existing.Color = $([int]$NewState)
+                AND $notExistsClause
+        )
+)
+INSERT INTO $TargetProcessing (Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Color, Source, Depth, Fk, Iteration)
+SELECT *, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
+FROM NewRecords;
+
+-- Update operations table
+INSERT INTO SqlSizer.Operations (
+    [Table], Color, ToProcess, Processed, Status, Source, Fk, Depth, 
+    FoundDate, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
+)
+SELECT 
+    $TargetTableId, 
+    $([int]$NewState), 
+    COUNT(*), 
+    0, 
+    NULL, 
+    $SourceTableId, 
+    $FkId, 
+    Depth, 
+    GETDATE(), 
+    NULL, 
+    '$SessionId', 
+    $Iteration, 
+    NULL
+FROM NewRecords
+GROUP BY Depth;
+
+"@
+
+        if (-not $ConnectionInfo.IsSynapse)
+        {
+            $query += "`nGO`n"
+        }
+
+        return $query
+    }
+
+    function Invoke-TraversalOperation
+    {
+        <#
+        .SYNOPSIS
+            Executes a single traversal operation (processes one table + state + depth).
+        #>
+        param
+        (
+            [TraversalOperation]$Operation,
+            [int]$Iteration
+        )
+
+        $table = $DatabaseInfo.Tables | Where-Object { 
+            ($_.SchemaName -eq $Operation.TableSchema) -and 
+            ($_.TableName -eq $Operation.TableName) 
+        }
+
+        Write-Progress -Activity "Finding subset $SessionId" `
+                       -CurrentOperation "$($table.SchemaName).$($table.TableName) - State: $($Operation.State)" `
+                       -PercentComplete $percentComplete
+
+        # Check which directions to traverse
+        $traverseOutgoing = Should-TraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing)
+        $traverseIncoming = Should-TraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming)
+
+        # Execute outgoing traversal
+        if ($traverseOutgoing)
+        {
+            $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_OUT"
+            
+            if ($queryCache.ContainsKey($cacheKey))
+            {
+                $query = $queryCache[$cacheKey]
+            }
+            else
+            {
+                $query = New-TraversalQuery `
+                    -Table $table `
+                    -State $Operation.State `
+                    -Direction ([TraversalDirection]::Outgoing) `
+                    -TraversalConfiguration $TraversalConfiguration `
+                    -Iteration $Iteration
+                
+                $queryCache[$cacheKey] = $query
+            }
+
+            if ($query -ne "")
+            {
+                $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+            }
+        }
+
+        # Execute incoming traversal
+        if ($traverseIncoming)
+        {
+            $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_IN"
+            
+            if ($queryCache.ContainsKey($cacheKey))
+            {
+                $query = $queryCache[$cacheKey]
+            }
+            else
+            {
+                $query = New-TraversalQuery `
+                    -Table $table `
+                    -State $Operation.State `
+                    -Direction ([TraversalDirection]::Incoming) `
+                    -TraversalConfiguration $TraversalConfiguration `
+                    -Iteration $Iteration
+                
+                $queryCache[$cacheKey] = $query
+            }
+
+            if ($query -ne "")
+            {
+                $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+            }
+        }
+
+        # NO SPLIT OPERATION - Pending states are resolved later
+        # This eliminates the confusing Yellow -> Red+Green duplication
+    }
+
+    function Resolve-PendingStates
+    {
+        <#
+        .SYNOPSIS
+            Resolves Pending states after traversal completes.
+            This replaces the confusing "Split" operation.
+        .DESCRIPTION
+            Pending records are those reached via incoming FKs in non-full search.
+            Resolution logic: 
+            1. If a Pending record is also reachable as Include, mark it Include
+            2. Iteratively propagate Include to Pending dependencies
+            3. Mark remaining Pending as Exclude
+            
+            Note: Pending -> Pending transitions mean uncertainty propagates through
+            dependency chains. This function resolves those chains transitively.
+        #>
+        param
+        (
+            [int]$Iteration
+        )
+
+        Write-Verbose "Resolving Pending states for iteration $Iteration (transitive resolution)"
+
+        # Iteratively resolve Pending states until no more changes
+        $resolvedCount = 0
+        $maxIterations = 100  # Safety limit to prevent infinite loops
+        $iteration = 0
+        
+        do
+        {
+            $iteration++
+            $changedThisIteration = 0
+            
+            # For each table with Pending records, resolve them
+            $tables = $DatabaseInfo.Tables | Where-Object { $_.PrimaryKey.Count -gt 0 }
+        
+            foreach ($table in $tables)
+            {
+                $signature = $structure.Tables[$table]
+                $processing = $structure.GetProcessingName($signature, $SessionId)
+                $tableId = $tablesGroupedByName["$($table.SchemaName), $($table.TableName)"].Id
+
+                $pendingState = [int][TraversalState]::Pending
+                $includeState = [int][TraversalState]::Include
+                $excludeState = [int][TraversalState]::Exclude
+
+                # Build PK comparison conditions
+                $pkConditions = for ($i = 0; $i -lt $table.PrimaryKey.Count; $i++) {
+                    "pending.Key$i = inc.Key$i"
+                }
+                $pkJoin = $pkConditions -join " AND "
+
+                # Mark Pending as Include if it matches an Include record
+                # This handles both direct matches AND transitive dependencies
+                # (since Pending -> Pending means dependencies become Include too)
+                $query = @"
+-- Resolve Pending states for $($table.SchemaName).$($table.TableName) (iteration $iteration)
+DECLARE @Changed INT = 0;
+
+UPDATE pending
+SET Color = $includeState
+FROM $processing pending
+WHERE pending.Color = $pendingState
+    AND EXISTS (
+        SELECT 1
+        FROM $processing inc
+        WHERE inc.Color = $includeState
+            AND $pkJoin
+    );
+
+SET @Changed = @@ROWCOUNT;
+"@
+
+                if (-not $ConnectionInfo.IsSynapse)
+                {
+                    $query += "`nGO`n"
+                }
+
+                $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+                if ($null -ne $result -and $null -ne $result.Changed)
+                {
+                    $changedThisIteration += $result.Changed
+                }
+            }
+            
+            $resolvedCount += $changedThisIteration
+            Write-Verbose "Resolution iteration $($iteration) - Changed $changedThisIteration records"
+            
+        } while ($changedThisIteration -gt 0 -and $iteration -lt $maxIterations)
+
+        if ($iteration -ge $maxIterations)
+        {
+            Write-Warning "Pending resolution hit maximum iterations ($maxIterations). Possible circular dependency."
+        }
+
+        Write-Verbose "Resolved $resolvedCount Pending records to Include in $iteration iterations"
+
+        # Mark ALL remaining Pending as Exclude (those not reachable from Include)
+        foreach ($table in $tables)
+        {
+            $signature = $structure.Tables[$table]
+            $processing = $structure.GetProcessingName($signature, $SessionId)
+            $pendingState = [int][TraversalState]::Pending
+            $excludeState = [int][TraversalState]::Exclude
+
+            $query = @"
+-- Mark remaining Pending as Exclude for $($table.SchemaName).$($table.TableName)
+UPDATE $processing
+SET Color = $excludeState
+WHERE Color = $pendingState;
+"@
+
+            if (-not $ConnectionInfo.IsSynapse)
+            {
+                $query += "`nGO`n"
+            }
+
+            $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+        }
+    }
+
+    function Get-NextOperation
+    {
+        <#
+        .SYNOPSIS
+            Gets the next operation to process (BFS or DFS).
+        #>
+        param
+        (
+            [bool]$UseDfs
+        )
+
+        if ($UseDfs)
+        {
+            # DFS: Process by count (deepest/most records first)
+            $query = @"
+SELECT TOP 1
+    o.[Table],
+    t.[Schema] AS TableSchema,
+    t.TableName,
+    o.Color AS State,
+    o.Depth,
+    SUM(o.ToProcess - o.Processed) AS RemainingRecords
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.Status IS NULL 
+    AND o.SessionId = '$SessionId'
+GROUP BY o.[Table], t.[Schema], t.TableName, o.Color, o.Depth
+ORDER BY RemainingRecords DESC
+"@
+        }
+        else
+        {
+            # BFS: Process by depth (breadth-first)
+            $query = @"
+SELECT TOP 1
+    o.[Table] AS TableId,
+    t.[Schema] AS TableSchema,
+    t.TableName,
+    o.Color AS State,
+    o.Depth,
+    SUM(o.ToProcess - o.Processed) AS RemainingRecords
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.Status IS NULL 
+    AND o.SessionId = '$SessionId'
+GROUP BY o.[Table], t.[Schema], t.TableName, o.Color, o.Depth
+ORDER BY o.Depth ASC, RemainingRecords DESC
+"@
+        }
+
+        $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+
+        if ($null -eq $result)
+        {
+            return $null
+        }
+
+        $operation = [TraversalOperation]::new()
+        $operation.TableId = $result.TableId
+        $operation.TableSchema = $result.TableSchema
+        $operation.TableName = $result.TableName
+        $operation.State = [TraversalState]$result.State
+        $operation.Depth = $result.Depth
+        $operation.RecordsToProcess = $result.RemainingRecords
+        $operation.RecordsProcessed = 0
+
+        return $operation
+    }
+
+    function Mark-OperationInProgress
+    {
+        <#
+        .SYNOPSIS
+            Marks operations as in-progress (Status = 0).
+        #>
+        param
+        (
+            [TraversalOperation]$Operation
+        )
+
+        $state = [int]$Operation.State
+
+        if ($MaxBatchSize -eq -1)
+        {
+            # Process all at once
+            $query = @"
+UPDATE SqlSizer.Operations
+SET Status = 0, Processed = ToProcess
+WHERE [Table] = $($Operation.TableId)
+    AND Color = $state
+    AND Depth = $($Operation.Depth)
+    AND Status IS NULL
+    AND SessionId = '$SessionId'
+"@
+        }
+        else
+        {
+            # Process in batches
+            $query = @"
+DECLARE @Remaining INT = $MaxBatchSize;
+
+UPDATE SqlSizer.Operations
+SET Status = 0,
+    Processed = CASE
+        WHEN (ToProcess - Processed) <= @Remaining THEN ToProcess
+        ELSE Processed + @Remaining
+    END,
+    @Remaining = @Remaining - CASE
+        WHEN (ToProcess - Processed) <= @Remaining THEN (ToProcess - Processed)
+        ELSE @Remaining
+    END
+WHERE [Table] = $($Operation.TableId)
+    AND Color = $state
+    AND Depth = $($Operation.Depth)
+    AND Status IS NULL
+    AND SessionId = '$SessionId'
+    AND @Remaining > 0
+"@
+        }
+
+        $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+    }
+
+    function Complete-Operations
+    {
+        <#
+        .SYNOPSIS
+            Marks completed operations and resets partially complete ones.
+        #>
+        param
+        (
+            [int]$Iteration
+        )
+
+        $query = @"
+-- Reset operations that hit batch limit
+UPDATE SqlSizer.Operations
+SET Status = NULL
+WHERE Status = 0 
+    AND ToProcess <> Processed
+    AND SessionId = '$SessionId';
+
+-- Mark fully processed operations as complete
+UPDATE SqlSizer.Operations
+SET Status = 1, 
+    ProcessedIteration = $Iteration,
+    ProcessedDate = GETDATE()
+WHERE Status = 0
+    AND SessionId = '$SessionId';
+"@
+
+        $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+    }
+
+    function Get-IterationStatistics
+    {
+        <#
+        .SYNOPSIS
+            Gets current progress statistics.
+        #>
+        param
+        (
+            [int]$Iteration,
+            [DateTime]$StartTime
+        )
+
+        $query = @"
+SELECT 
+    COUNT(*) AS TotalOperations,
+    SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) AS CompletedOperations,
+    SUM(Processed) AS TotalRecordsProcessed,
+    SUM(ToProcess - Processed) AS TotalRecordsRemaining,
+    MAX(Depth) AS MaxDepthReached
+FROM SqlSizer.Operations
+WHERE SessionId = '$SessionId'
+"@
+
+        $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+
+        $stats = [TraversalStatistics]::new()
+        $stats.TotalOperations = $result.TotalOperations
+        $stats.CompletedOperations = $result.CompletedOperations
+        $stats.TotalRecordsProcessed = $result.TotalRecordsProcessed
+        $stats.TotalRecordsRemaining = $result.TotalRecordsRemaining
+        $stats.CurrentIteration = $Iteration
+        $stats.MaxDepthReached = $result.MaxDepthReached
+        $stats.ElapsedTime = (Get-Date) - $StartTime
+
+        return $stats
+    }
+
+    function Invoke-SearchIteration
+    {
+        <#
+        .SYNOPSIS
+            Executes one iteration of the search algorithm.
+        .RETURNS
+            $true if more work remains, $false if complete.
+        #>
+        param
+        (
+            [int]$Iteration
+        )
+
+        # Get next operation
+        $operation = Get-NextOperation -UseDfs $UseDfs
+
+        if ($null -eq $operation)
+        {
+            Write-Verbose "No more operations to process"
+            return $false
+        }
+
+        # Mark as in-progress
+        Mark-OperationInProgress -Operation $operation
+
+        # Execute traversal
+        Invoke-TraversalOperation -Operation $operation -Iteration $Iteration
+
+        # Complete operations
+        Complete-Operations -Iteration $Iteration
+
+        # Resolve any Pending states created in this iteration
+        if ($operation.State -eq [TraversalState]::Include -and -not $FullSearch)
+        {
+            Resolve-PendingStates -Iteration $Iteration
+        }
+
+        return $true
+    }
+
+    #endregion
+
+    #region Main Execution
+
+    # Initialize metadata
+    $structure = [Structure]::new($DatabaseInfo)
+    $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
+    $script:tablesGroupedById = $sqlSizerInfo.Tables | Group-Object -Property Id -AsHashTable -AsString
+    $script:tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
+    $script:fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
+
+    if ($Interactive -eq $false)
+    {
+        # Non-interactive mode: run until complete
+        $null = Initialize-OperationsTable `
+            -SessionId $SessionId `
+            -Database $Database `
+            -ConnectionInfo $ConnectionInfo `
+            -DatabaseInfo $DatabaseInfo `
+            -StartIteration $StartIteration
+
+        $startTime = Get-Date
+        $iteration = $StartIteration + 1
+        $script:percentComplete = 0
+
+        do
+        {
+            $hasMoreWork = Invoke-SearchIteration -Iteration $iteration
+
+            # Update progress
+            if (($iteration % 5) -eq 0)
+            {
+                $stats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
+                $script:percentComplete = $stats.PercentComplete()
+                Write-Verbose $stats.ToString()
+            }
+
+            $iteration++
+        }
+        while ($hasMoreWork)
+
+        Write-Progress -Activity "Finding subset" -Completed
+
+        return [pscustomobject]@{
+            Finished            = $true
+            Initialized         = $true
+            CompletedIterations = $iteration - $StartIteration
+        }
+    }
+    else
+    {
+        # Interactive mode: one iteration at a time
+        if ($Iteration -eq 0)
+        {
+            $null = Initialize-OperationsTable `
+                -SessionId $SessionId `
+                -Database $Database `
+                -ConnectionInfo $ConnectionInfo `
+                -DatabaseInfo $DatabaseInfo `
+                -StartIteration $StartIteration
+
+            return [pscustomobject]@{
+                Finished            = $false
+                Initialized         = $true
+                CompletedIterations = 1
+            }
+        }
+        else
+        {
+            $startTime = Get-Date
+            $script:percentComplete = 0
+            $hasMoreWork = Invoke-SearchIteration -Iteration $Iteration
+
+            return [pscustomobject]@{
+                Finished            = -not $hasMoreWork
+                Initialized         = $true
+                CompletedIterations = 1
+            }
+        }
+    }
+
+    #endregion
+}

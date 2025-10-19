@@ -1,317 +1,65 @@
-enum Color
-{
-    Red = 1
-    Green = 2
-    Yellow = 3
-    Blue = 4
-    Purple = 5
-}
+## Example that shows color map feature
 
-enum ForeignKeyRule
-{
-    NoAction = 1
-    Cascade = 2
-    SetNull = 3
-    SetDefault = 4
-}
+# Connection settings
+$server = "localhost"
+$database = "AdventureWorks2019"
+$username = "someuser"
+$password = ConvertTo-SecureString -String "pass" -AsPlainText -Force
 
-class ColorMap
-{
-    [ColorItem[]]$Items
-}
+# Create connection
+$connection = New-SqlConnectionInfo -Server $server -Username $username -Password $password
 
-class ColorItem
-{
-    [string]$SchemaName
-    [string]$TableName
-    [ForcedColor]$ForcedColor
-    [Condition]$Condition
-}
+# Get database info
+$info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 
-class ForcedColor
-{
-    [Color]$Color
-}
+# Start session
+$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
-class Condition
-{
-    [int]$Top = -1
-    [string]$SourceSchemaName = ""
-    [string]$SourceTableName = ""
-    [int]$MaxDepth = -1
-    [string]$FkName = ""
-}
+# Define start set
 
-class Query
-{
-    [Color]$Color
-    [string]$Schema
-    [string]$Table
-    [string[]]$KeyColumns
-    [string]$Where
-    [int]$Top
-    [string]$OrderBy
-}
+# Query 1: 10 persons with first name = 'John'
+$query = New-Object -TypeName Query2
+$query.State = [TraversalState]::Include  # Use modern TraversalState enum instead of legacy Color
+$query.Schema = "Person"
+$query.Table = "Person"
+$query.KeyColumns = @('BusinessEntityID')
+$query.Where = "[`$table].FirstName = 'John'"
+$query.Top = 10
+$query.OrderBy = "[`$table].LastName ASC"
 
-class Query2
+# Define traversal configuration using modern API
+$config = New-Object -Type TraversalConfiguration
+foreach ($table in $info.Tables)
 {
-    [TraversalState]$State
-    [string]$Schema
-    [string]$Table
-    [string[]]$KeyColumns
-    [string]$Where
-    [int]$Top
-    [string]$OrderBy
-}
-
-class DatabaseInfo
-{
-    [System.Collections.Generic.List[string]]$Schemas
-    [System.Collections.Generic.List[TableInfo]]$Tables
-    [System.Collections.Generic.List[ViewInfo]]$Views
-    [System.Collections.Generic.List[StoredProcedureInfo]]$StoredProcedures
-    
-    [int]$PrimaryKeyMaxSize
-    [string]$DatabaseSize
-}
-
-class StoredProcedureInfo
-{
-    [string]$Schema
-    [string]$Name
-    [string]$Definition
-}
-
-class TableInfo2
-{
-    [string]$SchemaName
-    [string]$TableName
-
-    static [bool] IsIgnored([string] $schemaName, [string] $tableName, [TableInfo2[]] $ignoredTables)
+    if ($table.TableName -eq "Password")
     {
-        $result = $false
+        $rule = New-Object -Type TraversalRule -ArgumentList $table.SchemaName, $table.TableName
+        
+        # Use StateOverride instead of ForcedColor for modern configuration
+        # Bidirectional traversal (was Purple in legacy)
+        $rule.StateOverride = New-Object -Type StateOverride -ArgumentList ([TraversalState]::Bidirectional)
 
-        foreach ($ignoredTable in $ignoredTables)
-        {
-            if (($ignoredTable.SchemaName -eq $schemaName) -and ($ignoredTable.TableName -eq $tableName))
-            {
-                $result = $true
-                break
-            }
-        }
-
-        return $result
-    }
-
-    [string] ToString()
-    {
-        return "$($this.SchemaName).$($this.TableName)"
+        # Use TraversalConstraints instead of Condition for modern configuration
+        $rule.Constraints = New-Object -Type TraversalConstraints
+        $rule.Constraints.SourceTableName = "Person"
+        $rule.Constraints.SourceSchemaName = "Person"
+        $config.Rules += $rule
     }
 }
 
-class TableInfo2WithColor
-{
-    [string]$SchemaName
-    [string]$TableName
-    [Color]$Color
+Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+
+# Find subset using refactored algorithm with modern TraversalConfiguration
+Measure-Command {
+    Find-Subset-Refactored -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -TraversalConfiguration $config -SessionId $sessionId
 }
 
-class SubsettingTableResult
-{
-    [string]$SchemaName
-    [string]$TableName
-    [bool]$CanBeDeleted
-    [long]$RowCount
-    [int]$PrimaryKeySize
-}
-
-class SubsettingProcess
-{
-    [long]$ToProcess
-    [long]$Processed
-}
-
-class TableStatistics
-{
-    [long]$Rows
-    [long]$ReservedKB
-    [long]$DataKB
-    [long]$IndexSize
-    [long]$UnusedKB
-
-    [string] ToString()
-    {
-        return "$($this.Rows) rows  => [$($this.DataKB) used of $($this.ReservedKB) reserved KB, $($this.IndexSize) index KB]"
-    }
-}
-
-class DatabaseStructureInfo
-{
-    [TableStructureInfo[]]$Tables
-    [TableFk[]]$Fks
-}
-
-class TableStructureInfo
-{
-    [string]$SchemaName
-    [string]$TableName
-    [ColumnInfo[]]$PrimaryKey
-}
-
-class ViewInfo
-{
-    [string]$SchemaName
-    [string]$ViewName
-    [string]$Definition
-}
-
-class TableInfo
-{
-    [int]$Id
-    [string]$SchemaName
-    [string]$TableName
-    [bool]$IsIdentity
-    [bool]$IsHistoric
-    [bool]$HasHistory
-    [string]$HistoryOwner
-    [string]$HistoryOwnerSchema
-
-    [System.Collections.Generic.List[ColumnInfo]]$PrimaryKey
-    [System.Collections.Generic.List[ColumnInfo]]$Columns
-
-    [System.Collections.Generic.List[Tablefk]]$ForeignKeys
-    [System.Collections.Generic.List[TableInfo]]$IsReferencedBy
-
-    [System.Collections.Generic.List[ViewInfo]]$Views
-
-    [System.Collections.Generic.List[string]]$Triggers
-
-    [TableStatistics]$Statistics
-
-    [System.Collections.Generic.List[TableIndex]]$Indexes
-
-    [string] ToString()
-    {
-        return "$($this.SchemaName).$($this.TableName)"
-    }
-}
-
-class TableIndex
-{
-    [string]$Name
-    [System.Collections.Generic.List[string]]$Columns
-}
-
-class ColumnInfo
-{
-    [string]$Name
-    [string]$DataType
-    [string]$Length
-    [bool]$IsNullable
-    [bool]$IsComputed
-    [bool]$IsGenerated
-    [string]$ComputedDefinition
-    [bool]$IsPresent
-    [string] ToString()
-    {
-        return $this.Name;
-    }
-}
-
-class TableFk
-{
-    [string]$Name
-    [string]$FkSchema
-    [string]$FkTable
-
-    [string]$Schema
-    [string]$Table
-
-    [ForeignKeyRule]$DeleteRule
-    [ForeignKeyRule]$UpdateRule
-
-    [System.Collections.Generic.List[ColumnInfo]]$FkColumns
-    [System.Collections.Generic.List[ColumnInfo]]$Columns
-}
-
-class SqlConnectionStatistics
-{
-    [long]$LogicalReads
-}
-
-class SqlConnectionInfo
-{
-    [string]$Server
-    [System.Management.Automation.PSCredential]$Credential
-    [string]$AccessToken = $null
-    [bool]$EncryptConnection = $false
-    [SqlConnectionStatistics]$Statistics
-    [bool]$IsSynapse = $false
-}
-
-class TableFile
-{
-    [string]$FileId
-    [SubsettingTableResult]$TableContent
-}
-
-class Structure
-{
-    [DatabaseInfo] $DatabaseInfo
-    [System.Collections.Generic.Dictionary[String, ColumnInfo[]]] $Signatures
-    [System.Collections.Generic.Dictionary[TableInfo, String]] $Tables
-
-    Structure(
-        [DatabaseInfo]$DatabaseInfo
-    )
-    {
-        $this.DatabaseInfo = $DatabaseInfo
-        $this.Signatures = New-Object "System.Collections.Generic.Dictionary[[string], ColumnInfo[]]"
-        $this.Tables = New-Object "System.Collections.Generic.Dictionary[[TableInfo], [string]]"
-
-        foreach ($table in $this.DatabaseInfo.Tables)
-        {
-            if ($table.PrimaryKey.Count -eq 0)
-            {
-                continue
-            }
-
-            if ($table.SchemaName.StartsWith("SqlSizer"))
-            {
-                continue
-            }
-
-            $signature = $this.GetTablePrimaryKeySignature($table)
-            $this.Tables[$table] = $signature
-
-            if ($this.Signatures.ContainsKey($signature) -eq $false)
-            {
-                $null = $this.Signatures.Add($signature, $table.PrimaryKey)
-            }
-        }
-    }
-
-    [string] GetProcessingName([string] $Signature, [string] $SessionId)
-    {
-        return "SqlSizer_$SessionId." + $Signature
-    }
-
-    [string] GetSliceName([string] $Signature, [string] $SessionId)
-    {
-        return "SqlSizer_$SessionId.Slice" + $Signature
-    }
-
-    [string] GetTablePrimaryKeySignature([TableInfo]$Table)
-    {
-        $result = $Table.SchemaName + "_" + $Table.TableName
-        return $result
-    }
-}
+# end of script
 # SIG # Begin signature block
 # MIIoigYJKoZIhvcNAQcCoIIoezCCKHcCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXLIWS10LvEb1T
-# 0p58JGEMaW0hYjtbL53BTaD9F5CAQqCCIL4wggXJMIIEsaADAgECAhAbtY8lKt8j
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCad5e5TxiEcfVT
+# 90p9Gs5qMKTPt2ntkaCEhvnqVUO49qCCIL4wggXJMIIEsaADAgECAhAbtY8lKt8j
 # AEkoya49fu0nMA0GCSqGSIb3DQEBDAUAMH4xCzAJBgNVBAYTAlBMMSIwIAYDVQQK
 # ExlVbml6ZXRvIFRlY2hub2xvZ2llcyBTLkEuMScwJQYDVQQLEx5DZXJ0dW0gQ2Vy
 # dGlmaWNhdGlvbiBBdXRob3JpdHkxIjAgBgNVBAMTGUNlcnR1bSBUcnVzdGVkIE5l
@@ -491,38 +239,38 @@ class Structure
 # Z25pbmcgMjAyMSBDQQIQYpSo2Nu09IRO7XqaiixN1TANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDdsdYP87AQVXQHfX3ILrU0ih32BR1aH+x49Owys30QKzANBgkqhkiG9w0B
-# AQEFAASCAgCOTm/PS4DuliwSvJouR3prkqL4fX5SdfsOYafl3GUeDZkcFiq50GPa
-# CqEG8hM045u4NhjAhL8Y5vR9+qkBledHMPVOj2NEW5zd2/4JgAjT51yy16UiZUPu
-# ayvA0LoQ57Bd//5ZHl6hL8dfkrrIo9K5SEuvzNBDrcFCaWN80AElKDJeO1T07tiL
-# 9tXHXP1oQrICjJYcsFgsFz1S+LzCEPok6LEN37b4JCTMa0Z57aiavfSwwpf0bmmh
-# oT8KThJG3jI/GjDm+sy7ce7R98jIz53kL75jpkOKGWR1dS9e/gBjxTo8GOxbisc4
-# f01ItXhy+ALE3YZFQBN+/dN6W4/hPf1LX4wOVn+rV4T9myYOdU5mAVA1SG0QDnz8
-# lCvVJ/14WwE0ZWTnyXGxQigPys64oJQ9kltHA39XJlN7o8AuBvXz0ls7cKKaEFIk
-# muTAmpeufv/EBgztB52uRpFoVNE0m+p0nzqQyEJUhefV5iP4kYQhVHSVlVYmtAzf
-# TIcOE3XeYAkfp8CdyMOGHf3vMBrF2QRlUwTXGafpkPjyY98lUcLO7jP9moGHF2uZ
-# OB5zVurOmQUmEK1h7s70jGX77ZwE68vwK5OCozNbW//u6/9Ej76/OiMAgZHDZE8F
-# mcwHAOdXNIWMJoB2Vp8N/3Vh+ffngTaJBBumvuDXtX3n1gus3gNYKKGCBAIwggP+
+# BDEiBCC8uB5VuI20Y0Rt9LQmZThNcp9IBLzjAZRpJN7ttP8V7jANBgkqhkiG9w0B
+# AQEFAASCAgBKV4nSA6PvhvNE9TPPpPUL2h3kqYl4Vq9Jm6CTiWJBf+7PG4alQEFg
+# q55WE+aCGG0tPMS7M9oNNMVrFDMa0XPd0ONploPtTa6oI3N3s6CCnQ6sYNyGl9Wb
+# RkhtdUuKtdxhM0rGvR9MYyBrBGPhG2PxLKpfyVIrKl5DKkih12R6Ym2IMDoo5qzc
+# iGZ7wIEfrA1aSjiZ+CfAlPPHTI5mCnOw0kShxmbiClduEYsmJAOdlw712mqNIyH/
+# MTK75wnbCIWCLBAWmkNNj7w8sV0dSCjZmezVnqXlBvd6CyM762SHPdt6hM4g4aIk
+# CgAH37kCPliIAJMo6/eHiWW6EBHgS5JbmKhFzd873skXo/KtDjtO6B7eOgFcVJZ2
+# X2KH2ktAietf6zX1n+aycabvZrH2NzSFSOph4sSwCiFrmIXas3qFeYxg0DAVyRxT
+# WIHTYpYPaJc+oqQU60SrtJhzuA1coOov18HZitFTknrdibR+85NDyGQrxuq0E48W
+# LmywQ7qV1FkpBqzv4nV4lhSdJ1xWyUsZck8xJvuZPj/Knca5VuFAXQs1vKDSHu0N
+# iJGG/YWXA7pGIklzTVLRBb8lUTaXeaKgY+vNxVqmTrU0pgOZ0rBzcFT3MaRnrsRI
+# chIhDCT/DD6OIJzFkKNIOSit3Bi/13KRTBDPx7pgHTXrkzFFV4++zKGCBAIwggP+
 # BgkqhkiG9w0BCQYxggPvMIID6wIBATBqMFYxCzAJBgNVBAYTAlBMMSEwHwYDVQQK
 # ExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMuQS4xJDAiBgNVBAMTG0NlcnR1bSBUaW1l
 # c3RhbXBpbmcgMjAyMSBDQQIQK9SucLnQY1sq6YTI1nSqMDANBglghkgBZQMEAgIF
 # AKCCAVYwGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMBwGCSqGSIb3DQEJBTEP
-# Fw0yMzAyMTgyMzA3NThaMDcGCyqGSIb3DQEJEAIvMSgwJjAkMCIEIAO5mmRJdJhK
-# lbbMXYDTRNB0+972yiQEhCvmzw5EIgeKMD8GCSqGSIb3DQEJBDEyBDBZM61DtitS
-# mAOzoCucwgfdrxQboRnRr4AWVir2odkt7lhUq2qE1LsflKapotX3wGswgZ8GCyqG
+# Fw0yMzAyMTgyMjU3MDJaMDcGCyqGSIb3DQEJEAIvMSgwJjAkMCIEIAO5mmRJdJhK
+# lbbMXYDTRNB0+972yiQEhCvmzw5EIgeKMD8GCSqGSIb3DQEJBDEyBDDn4K9avYPd
+# G5dafOQPjnVmcwWqRiJFormtZS0BK3YkYSX2pstJknIkET/slMzt2FQwgZ8GCyqG
 # SIb3DQEJEAIMMYGPMIGMMIGJMIGGBBS/T2vEmC3eFQWo78jHp51NFDUAzjBuMFqk
 # WDBWMQswCQYDVQQGEwJQTDEhMB8GA1UEChMYQXNzZWNvIERhdGEgU3lzdGVtcyBT
 # LkEuMSQwIgYDVQQDExtDZXJ0dW0gVGltZXN0YW1waW5nIDIwMjEgQ0ECECvUrnC5
-# 0GNbKumEyNZ0qjAwDQYJKoZIhvcNAQEBBQAEggIAWxExi4YND1q0NXLN2FG7rg6F
-# 7nUaQvYbcvicGLGHriqWyytQ+hqQzU+JK5iU7iJZbhJMxCdlsqIoRTnmrRtnkMiO
-# 8Kmiv29LSHeK6q0Mz0YBfMnK+a2/e30Kei+D+40pYbc7dM4P5a6aDcd9IqaNhp0I
-# 8cOOuOxhM4dCtcFUeMYNX5yc/LNjRYai3r8ObU7LNhvW8mgI1kkG+g5CF9zTFO2N
-# hBPl6VT+RhI7faPI2ynvcTIwEOqBnXVHm4r20Smb7OzeWwtOFxxesdAkhWzXG+mK
-# pTH1ASRyjxwXZhDhn8cqHVDLWM1FI4TFkNnbzkv7G0Tmu2YW7T2I8i9puz1v3FwT
-# +U/C2qly3mSntkQ8ABNnufoPPLGHXZZT8nqv/ZZs/k/z9GlPmqBNe2oFIQbFjkc3
-# rGaINiB/vR1vzvDgKnIMi4IvxghmbmHQQk1oz1SHpsnRWLZArjQR98iqTUgV67yr
-# 0EbWKacCulOSvDOqttniYeYVpJqgA7DVDiopm1fO+DKuVH7dpKj6UswQaDl9T8pa
-# P3HLzM1S/SXzIssX9tRkuN9k++tP0vaoWywRaONBrfmjeoftXgZA9XwRdZ+FTcOU
-# fBDJRHwY4wn9h366DXvqOgsl3UVjfmdGCLec/n0EncXAevFqh2JWIfMor/AI0gsK
-# mJEppRvqIpYsS7+bjVI=
+# 0GNbKumEyNZ0qjAwDQYJKoZIhvcNAQEBBQAEggIAkuD+PObUqvCj8EmsK/ZfQCp2
+# Rgu/2CoW83X2UVaNVH3mSyFxSUEnoJ5PMLxP/So113hcRY5uAtSytGTzmB2Rqxey
+# shyDyFWluBVS/E6mbuc2FVJ8AtKVpg8xPFwDRDUwU0/n17sH8hEB50I5C9C7ODCL
+# 8jX/RwhXknuNHY8VGNhrAwlkrOu0vhsVvCrh82OPi5KOryRUDqSRGRGlOiXF0/Kp
+# PVNGu9pxJfiO9xdKaDv6NDwyoT0gTRIS+Y+AU1K1TnN9LRkyOsBRpnni0X+LiPEW
+# GAqyNfDwTaeqVKgg4Y2TFW7J2BGVGMCnKPFjoBK8nGTnDh4lZ1FpkV9+OUgSqfi7
+# s2ATdywiaIcTcrehdnZJkx2GbxKPQ1HL6XsP9Lb7Cl+VYN+WvsizwDjzUD8fKCm5
+# Rp1yvoNTxQOgj4CPUUQGMidyviV4qQ5WoDjHWPh0ps3xPxmcNiYwA4ChThJVeLyM
+# lFdnWkKirT4hqAGKkmKglvFGzk9ONDUhB1q+nFOnXDYRN7qHVqGNUbX40mmFG3+s
+# eif3HBUSigStaFK9zUuAVNOLMHAFOvfh861n+0YQvntoP0eXav/Azq5ZhFXn1LDZ
+# aF43QA/EW+SQpGKrsaW5ieFqlHxLUL6zKxJ9VPn6rBzoioEECEn13TMzt1O7wlzX
+# /wk9/1nKC0r7DRouReU=
 # SIG # End signature block

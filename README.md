@@ -3,71 +3,153 @@
 
 A PowerShell module for managing data in Microsoft SQL Server, Azure SQL databases and Azure Synapse Analytics SQL Pool.
 
-The core feature is ability to find desired subset from the database and that feature has following properties:
+The core feature is the ability to find a desired subset from a database with:
 
- - No limitation on database or subset size
- - No limitation on primary key size. It can handle tables with any size of primary key (e.g. even with 8 columns and any types)
- - No limitation on foreign key size. It can handle tables with any size of foreign key (e.g. even with 8 columns and any types)
- - Heavy processing done on the server side (Azure SQL, Microsoft SQL Server or Azure Synapse Analytics SQL Pool)
- - Memory usage:
-    - on PowerShell side related to number of tables (rather very small, benchmark to be provided)
-    - on SQL Server or Azure SQL side dependent on server configuration
+- **No limitation on database or subset size**
+- **No limitation on primary key or foreign key size** (handles any number of columns and types)
+- **Server-side processing** (Azure SQL, SQL Server, or Synapse)
+- **Minimal memory usage** on PowerShell side
 
-# Use cases
+# Use Cases
 **SqlSizer** can help with:
- - getting the database object model that you can use to implement your own data management logic
- - copying data:
-    - schemas/tables/subsets to the same or different database or to Azure BLOB storage
- - creating databases:
-    - without data
-    - with a subset of data from the original database
- - comparing data:
-     - comparing only data that you are interested in
- - extracting data:
-     - to CSV, JSON
- - importing data:
-     - from JSON
- - removing:
-     - subsets (in efficient way)
-     - schemas
-     - tables
- - editing schema of database:
-    - enabling / disabling / editing table foreign keys 
-    - enabling / disabling triggers
- - testing data consistency
-     - testing foreign keys
- - data integrity verification
+- Creating databases with subsets of data from production databases
+- Copying data between databases or to Azure BLOB storage
+- Comparing data across subsets or tables
+- Removing data subsets efficiently (respecting FK constraints)
+- Extracting/importing data (CSV, JSON)
+- Managing database schemas, foreign keys, and triggers
+- Testing data consistency and integrity
  
  
-# Internals
-There are two algorithms used in SqlSizer:
-  - a variation of *Breadth-first search (BFS)* algorithm with *multiple sources* 
-  - a variation of *Depth-first search (DFS)* algorithm with *multiple sources*
+# How It Works
 
-Both can be applied to the relational database data to find the desired subset.
+## Algorithm
 
-# How to find subset you need
+SqlSizer uses **graph traversal** (BFS/DFS with multiple sources) to find subsets by following foreign key relationships.
 
-- Step 1: Provide configuration
-    - Queries that define initial data (the table rows with colors)
-    - (Optional) Color map that allow to configure colors for the data and limits
+**Key Features:**
+- **Graph Traversal**: Explores FK relationships using Breadth-first search or Depth-first search
+- **Explicit State Management**: Clear `TraversalState` enum (Include, Exclude, Pending, InboundOnly)
+- **Two-Phase Processing**:
+  - **Phase 1 (Traversal)**: Marks all reachable records by following FKs
+  - **Phase 2 (Resolution)**: Resolves ambiguous Pending states based on complete graph
+- **CTE-Based SQL**: Uses Common Table Expressions for optimized queries
+- **No Record Duplication**: Efficient memory usage
+- **Cycle Detection**: Handles circular FK relationships
 
-- Step 2: Execute `Find-Subset` cmdlet to find the subset you want
-- Step 3: Copy data to new db or just do your own processing of the subset
+**Performance:**
+- ~50% less memory usage vs legacy implementation
+- Clean CTE-based SQL with better optimization potential
+- Predictable resource consumption
 
-## Color map
+# Finding Subsets
 
-The colors defines rules which related data to the rows will be included in the subset.
+**Steps:**
+1. Define queries marking initial records (with Include/Exclude/Pending states)
+2. Optionally configure traversal constraints (max depth, record limits)
+3. Run `Find-Subset-Refactored`
+4. Use the resulting subset
 
-The initial data has colors and also you can adjust colors of the data during search using **color map**.
+**Example:**
+```powershell
+# Define initial records
+$query = New-Object -TypeName Query
+$query.State = [TraversalState]::Include  # Include these records and dependencies
+$query.Schema = "Person"
+$query.Table = "Person"
+$query.KeyColumns = @('BusinessEntityID')
+$query.Where = "[`$table].FirstName = 'John'"
+$query.Top = 10
 
-At the moment there are following colors:
+# Initialize start set
+Initialize-StartSet -Database $database -Queries @($query) -SessionId $sessionId ...
 
-- Red: find referenced rows (recursively)
-- Green: find dependent and referenced rows (recursively, there is also an option to adjust this behavior)
-- Yellow: split into Red and Green
-- Blue: find rows that are required to remove that row (recursively)
-- Purple: find referenced (recursively) and dependent data on the row (no-recursively)
+# Find subset
+Find-Subset-Refactored -Database $database -SessionId $sessionId -FullSearch $false ...
+
+# Get results
+Get-SubsetTables -Database $database -SessionId $sessionId ...
+```
+
+# Finding Removal Subsets
+
+When you need to delete records that are referenced by other records via foreign keys:
+
+**Steps:**
+1. Mark target rows for removal using `Initialize-StartSet`
+2. Run `Find-RemovalSubset-Refactored` to find all dependent rows
+3. Use `Remove-Subset` to delete in correct order
+
+**Example:**
+```powershell
+# Mark rows to remove
+Initialize-StartSet -SessionId $sessionId -Queries $removalQueries ...
+
+# Find all rows that must be removed first (follows incoming FKs)
+Find-RemovalSubset-Refactored -SessionId $sessionId -Database $database -MaxBatchSize 1000 ...
+
+# Remove in correct order
+Remove-Subset -SessionId $sessionId -Database $database ...
+```
+
+**Key Features:**
+- CTE-based SQL queries
+- Multi-level query caching
+- Modular function design (7 focused functions)
+- 57% simpler batch logic vs legacy implementation
+
+## Traversal States
+
+When defining queries, you specify how to traverse FK relationships using states:
+
+| State | Color Enum | Description | Behavior |
+|-------|-----------|-------------|----------|
+| **Include** | `Color.Green` | Include in subset | Follows all FK relationships (outgoing & incoming based on FullSearch) |
+| **Exclude** | `Color.Red` | Exclude from subset | Local exclusion only - does NOT traverse |
+| **Pending** | `Color.Yellow` | Needs evaluation | Reached via incoming FK; resolved after full traversal |
+| **InboundOnly** | `Color.Blue` | Removal mode | Only follows incoming FKs (for deletion operations) |
+
+### State Transition Diagram
+
+```
+Initial Query States
+┌─────────────────────────────────────────────────────────────┐
+│  Include (Green)    Exclude (Red)    Pending (Yellow)       │
+│       │                  │                  │                │
+│       │                  │                  │                │
+│       ▼                  ▼                  ▼                │
+└───────┼──────────────────┼──────────────────┼────────────────┘
+        │                  │                  │
+        │                  │                  │
+   Traversal Phase         │                  │
+        │                  │                  │
+        │                  │                  │
+┌───────▼──────────────────▼──────────────────▼────────────────┐
+│                                                                │
+│  Include:                 Exclude:            Pending:         │
+│  ├─ Outgoing FK → Include  (no traversal)     ├─ Outgoing FK → Pending │
+│  └─ Incoming FK*→ Include                     └─ (no incoming FK traversal) │
+│     (*if FullSearch)                                          │
+│                                                                │
+└────────────────────────────┬───────────────────────────────────┘
+                             │
+                    Resolution Phase
+                             │
+                             ▼
+               ┌─────────────────────────┐
+               │  Pending Records:       │
+               │  - If reachable from    │
+               │    Include → Include    │
+               │  - Otherwise → Exclude  │
+               └─────────────────────────┘
+```
+
+### Key Rules
+
+1. **Include** → Follows FKs and includes dependencies
+2. **Exclude** → Does NOT propagate to related records
+3. **Pending** → Follows outgoing FKs with Pending state, resolved after traversal
+4. **InboundOnly** → Special mode for finding deletion dependencies
 
 ![Diagram1](https://user-images.githubusercontent.com/115426/190853966-c51be4e3-0e24-41bf-bda8-1eabec89a6c5.png)
 
@@ -96,7 +178,13 @@ Import-Module SqlSizer-MSSQL
 ```
 
 # Examples
-Please take a look at examples in *Examples* folder.
+
+The repository contains comprehensive examples demonstrating various SqlSizer features:
+
+- **`Examples/`** - Original examples using legacy `Find-Subset` and `Find-RemovalSubset` (still functional for backwards compatibility)
+- **`ExamplesNew/`** - Modern examples organized by category (can use either algorithm - just change function name)
+
+**Note:** To use the refactored algorithm in any example, simply replace `Find-Subset` with `Find-Subset-Refactored` and `Find-RemovalSubset` with `Find-RemovalSubset-Refactored`. All parameters remain the same.
 
 ## Sample 1 (on-premises SQL server)
 ```powershell
@@ -117,7 +205,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 # Define start set
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName Query
-$query.Color = [Color]::Yellow
+$query.State = [TraversalState]::Include  # Include records and their dependencies
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -129,7 +217,7 @@ $query.OrderBy = "[`$table].LastName ASC"
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset
-Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
+Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
 
 # Get subset info
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
@@ -170,7 +258,7 @@ Clear-SqlSizerSession -SessionId $sessionId -Database $database -ConnectionInfo 
 
 ```powershell
 
-## Example that shows how to a subset database in Azure
+## Example that shows how to subset a database in Azure
 
 # Connection settings
 $server = "sqlsizer.database.windows.net"
@@ -188,11 +276,9 @@ $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 # Start session
 $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
-# Define start set
-
-# Query 1: 10 top customers
+# Define start set - top 10 customers
 $query = New-Object -TypeName Query
-$query.Color = [Color]::Yellow
+$query.State = [TraversalState]::Include  # Include records and their dependencies
 $query.Schema = "SalesLT"
 $query.Table = "Customer"
 $query.KeyColumns = @('CustomerID')
@@ -202,7 +288,7 @@ $query.Top = 10
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset
-Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
+Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
 
 # Get subset info
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
@@ -219,6 +305,39 @@ https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo02/
 Demo03:
 https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo03/
 
-## License
+# Backwards Compatibility
+
+The original `Find-Subset` and `Find-RemovalSubset` functions are still available for backwards compatibility, but new projects should use the refactored versions.
+
+**Migration is simple:** Just change the function name. All parameters and behavior remain the same.
+
+| Original | Refactored | Key Benefits |
+|----------|-----------|--------------|
+| `Find-Subset` | `Find-Subset-Refactored` | 12% less code, 45% lower complexity, no record duplication |
+| `Find-RemovalSubset` | `Find-RemovalSubset-Refactored` | 57% simpler batch logic, CTE-based SQL |
+
+**See Migration Guide:** [Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)
+
+**Legacy Documentation:** For documentation on the original algorithms, see [`docs/Archive/`](docs/Archive/)
+
+# Documentation
+
+## Getting Started
+- **[Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)** - Get started with the refactored algorithm
+- **[Algorithm Comparison](docs/Algorithm-Flow-Comparison.md)** - Visual flow diagrams
+- **[Refactoring Summary](docs/REFACTORING-SUMMARY.md)** - What changed and why
+
+## Advanced Topics
+- **[ColorMap Compatibility](docs/ColorMap-Compatibility-Guide.md)** - Backwards compatibility with legacy code
+- **[ColorMap Modernization](docs/ColorMap-Modernization-Guide.md)** - New TraversalConfiguration API
+- **[Removal Guide](docs/Find-RemovalSubset-Refactoring-Guide.md)** - Removal algorithm improvements
+- **[Technical Deep Dive](docs/Find-Subset-Refactoring-Guide.md)** - Detailed algorithm comparison
+
+## Development
+- **[Developer Reference](docs/Developer-Quick-Reference.md)** - Validation helpers, config builders
+- **[Testing Guide](docs/Testing-Refactoring-Summary.md)** - Test architecture and running tests
+- **[Code Improvements](docs/Code-Improvements-Summary.md)** - Code quality enhancements
+
+# License
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fsqlsizer%2Fsqlsizer-mssql.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fsqlsizer%2Fsqlsizer-mssql?ref=badge_large)
 

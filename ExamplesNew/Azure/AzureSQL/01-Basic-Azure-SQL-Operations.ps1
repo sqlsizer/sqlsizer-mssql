@@ -1,317 +1,92 @@
-enum Color
+## Example that shows how to a subset database in Azure
+
+# Connection settings
+$server = "sqlsizer.database.windows.net"
+$database = "test01"
+$storageAccount = "<your storage account>"
+
+Connect-AzAccount
+$accessToken = (Get-AzAccessToken -ResourceUrl https://database.windows.net).Token
+
+# Create connection
+$connection = New-SqlConnectionInfo -Server $server -AccessToken $accessToken -EncryptConnection $true
+
+# Check if database is available
+if ((Test-DatabaseOnline -Database $database -ConnectionInfo $connection) -eq $false)
 {
-    Red = 1
-    Green = 2
-    Yellow = 3
-    Blue = 4
-    Purple = 5
+    Write-Verbose "Database is not available" 
+    return
 }
 
-enum ForeignKeyRule
+# Get database info
+$info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
+
+# Start session
+$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
+
+# Define start set
+
+# Query 1: 10 persons with first name = 'John'
+$query = New-Object -TypeName Query2
+$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.Schema = "SalesLT"
+$query.Table = "Customer"
+$query.KeyColumns = @('CustomerID')
+$query.Top = 10
+
+Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+
+# Find subset using refactored algorithm
+Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
+
+# Get subset info
+Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+
+Write-Verbose "Logical reads from db during subsetting: $($connection.Statistics.LogicalReads)"
+
+
+# Ensure that empty database with the database schema exists
+$emptyDb = "test03_empty"
+
+if ((Test-DatabaseOnline -Database $emptyDb -ConnectionInfo $connection) -eq $false)
 {
-    NoAction = 1
-    Cascade = 2
-    SetNull = 3
-    SetDefault = 4
+    New-EmptyAzDatabase -Database $database -NewDatabase $emptyDb -ConnectionInfo $connection -DatabaseInfo $info
 }
 
-class ColorMap
+# Create a copy of empty db for new subset db
+$newDatabase = "test03_$((New-Guid).ToString().Replace('-', '_'))"
+Copy-AzDatabase -Database $emptyDb -NewDatabase $newDatabase -ConnectionInfo $connection
+
+while ((Test-DatabaseOnline -Database $newDatabase -ConnectionInfo $connection) -eq $false)
 {
-    [ColorItem[]]$Items
+    Write-Verbose "Waiting for database"
+    Start-Sleep -Seconds 5
 }
 
-class ColorItem
-{
-    [string]$SchemaName
-    [string]$TableName
-    [ForcedColor]$ForcedColor
-    [Condition]$Condition
-}
+# Connect to storage
+$keys = Get-AzStorageAccountKey -Name $storageAccount -ResourceGroupName "SqlSizer"
+$ctx = New-AzStorageContext -StorageAccountName "$storageAccount" -StorageAccountKey "$($keys[0].Value)"
 
-class ForcedColor
-{
-    [Color]$Color
-}
+# Copy subset to storage account
+$container = "subset_for_$newDatabase".Replace('_', '').Substring(0, 30)
+Copy-SubsetToAzStorageContainer -ContainerName $container -StorageContext $ctx -Database $database -DatabaseInfo $info -ConnectionInfo $connection -Secure $false -SessionId $sessionId
 
-class Condition
-{
-    [int]$Top = -1
-    [string]$SourceSchemaName = ""
-    [string]$SourceTableName = ""
-    [int]$MaxDepth = -1
-    [string]$FkName = ""
-}
+$masterPassword = "$((New-Guid).ToString().Replace('-', '_'))"
+# Copy data from Azure Blob storage
+Import-SubsetFromAzStorageContainer -MasterPassword $masterPassword -Database $newDatabase -OriginalDatabase $database -ConnectionInfo $connection -DatabaseInfo $info `
+    -ContainerName $container -StorageAccountName $storageAccount -StorageContext $ctx
 
-class Query
-{
-    [Color]$Color
-    [string]$Schema
-    [string]$Table
-    [string[]]$KeyColumns
-    [string]$Where
-    [int]$Top
-    [string]$OrderBy
-}
+Test-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
+Remove-EmptyTables -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
 
-class Query2
-{
-    [TraversalState]$State
-    [string]$Schema
-    [string]$Table
-    [string[]]$KeyColumns
-    [string]$Where
-    [int]$Top
-    [string]$OrderBy
-}
+Write-Verbose "Azure SQL database created"
 
-class DatabaseInfo
-{
-    [System.Collections.Generic.List[string]]$Schemas
-    [System.Collections.Generic.List[TableInfo]]$Tables
-    [System.Collections.Generic.List[ViewInfo]]$Views
-    [System.Collections.Generic.List[StoredProcedureInfo]]$StoredProcedures
-    
-    [int]$PrimaryKeyMaxSize
-    [string]$DatabaseSize
-}
-
-class StoredProcedureInfo
-{
-    [string]$Schema
-    [string]$Name
-    [string]$Definition
-}
-
-class TableInfo2
-{
-    [string]$SchemaName
-    [string]$TableName
-
-    static [bool] IsIgnored([string] $schemaName, [string] $tableName, [TableInfo2[]] $ignoredTables)
-    {
-        $result = $false
-
-        foreach ($ignoredTable in $ignoredTables)
-        {
-            if (($ignoredTable.SchemaName -eq $schemaName) -and ($ignoredTable.TableName -eq $tableName))
-            {
-                $result = $true
-                break
-            }
-        }
-
-        return $result
-    }
-
-    [string] ToString()
-    {
-        return "$($this.SchemaName).$($this.TableName)"
-    }
-}
-
-class TableInfo2WithColor
-{
-    [string]$SchemaName
-    [string]$TableName
-    [Color]$Color
-}
-
-class SubsettingTableResult
-{
-    [string]$SchemaName
-    [string]$TableName
-    [bool]$CanBeDeleted
-    [long]$RowCount
-    [int]$PrimaryKeySize
-}
-
-class SubsettingProcess
-{
-    [long]$ToProcess
-    [long]$Processed
-}
-
-class TableStatistics
-{
-    [long]$Rows
-    [long]$ReservedKB
-    [long]$DataKB
-    [long]$IndexSize
-    [long]$UnusedKB
-
-    [string] ToString()
-    {
-        return "$($this.Rows) rows  => [$($this.DataKB) used of $($this.ReservedKB) reserved KB, $($this.IndexSize) index KB]"
-    }
-}
-
-class DatabaseStructureInfo
-{
-    [TableStructureInfo[]]$Tables
-    [TableFk[]]$Fks
-}
-
-class TableStructureInfo
-{
-    [string]$SchemaName
-    [string]$TableName
-    [ColumnInfo[]]$PrimaryKey
-}
-
-class ViewInfo
-{
-    [string]$SchemaName
-    [string]$ViewName
-    [string]$Definition
-}
-
-class TableInfo
-{
-    [int]$Id
-    [string]$SchemaName
-    [string]$TableName
-    [bool]$IsIdentity
-    [bool]$IsHistoric
-    [bool]$HasHistory
-    [string]$HistoryOwner
-    [string]$HistoryOwnerSchema
-
-    [System.Collections.Generic.List[ColumnInfo]]$PrimaryKey
-    [System.Collections.Generic.List[ColumnInfo]]$Columns
-
-    [System.Collections.Generic.List[Tablefk]]$ForeignKeys
-    [System.Collections.Generic.List[TableInfo]]$IsReferencedBy
-
-    [System.Collections.Generic.List[ViewInfo]]$Views
-
-    [System.Collections.Generic.List[string]]$Triggers
-
-    [TableStatistics]$Statistics
-
-    [System.Collections.Generic.List[TableIndex]]$Indexes
-
-    [string] ToString()
-    {
-        return "$($this.SchemaName).$($this.TableName)"
-    }
-}
-
-class TableIndex
-{
-    [string]$Name
-    [System.Collections.Generic.List[string]]$Columns
-}
-
-class ColumnInfo
-{
-    [string]$Name
-    [string]$DataType
-    [string]$Length
-    [bool]$IsNullable
-    [bool]$IsComputed
-    [bool]$IsGenerated
-    [string]$ComputedDefinition
-    [bool]$IsPresent
-    [string] ToString()
-    {
-        return $this.Name;
-    }
-}
-
-class TableFk
-{
-    [string]$Name
-    [string]$FkSchema
-    [string]$FkTable
-
-    [string]$Schema
-    [string]$Table
-
-    [ForeignKeyRule]$DeleteRule
-    [ForeignKeyRule]$UpdateRule
-
-    [System.Collections.Generic.List[ColumnInfo]]$FkColumns
-    [System.Collections.Generic.List[ColumnInfo]]$Columns
-}
-
-class SqlConnectionStatistics
-{
-    [long]$LogicalReads
-}
-
-class SqlConnectionInfo
-{
-    [string]$Server
-    [System.Management.Automation.PSCredential]$Credential
-    [string]$AccessToken = $null
-    [bool]$EncryptConnection = $false
-    [SqlConnectionStatistics]$Statistics
-    [bool]$IsSynapse = $false
-}
-
-class TableFile
-{
-    [string]$FileId
-    [SubsettingTableResult]$TableContent
-}
-
-class Structure
-{
-    [DatabaseInfo] $DatabaseInfo
-    [System.Collections.Generic.Dictionary[String, ColumnInfo[]]] $Signatures
-    [System.Collections.Generic.Dictionary[TableInfo, String]] $Tables
-
-    Structure(
-        [DatabaseInfo]$DatabaseInfo
-    )
-    {
-        $this.DatabaseInfo = $DatabaseInfo
-        $this.Signatures = New-Object "System.Collections.Generic.Dictionary[[string], ColumnInfo[]]"
-        $this.Tables = New-Object "System.Collections.Generic.Dictionary[[TableInfo], [string]]"
-
-        foreach ($table in $this.DatabaseInfo.Tables)
-        {
-            if ($table.PrimaryKey.Count -eq 0)
-            {
-                continue
-            }
-
-            if ($table.SchemaName.StartsWith("SqlSizer"))
-            {
-                continue
-            }
-
-            $signature = $this.GetTablePrimaryKeySignature($table)
-            $this.Tables[$table] = $signature
-
-            if ($this.Signatures.ContainsKey($signature) -eq $false)
-            {
-                $null = $this.Signatures.Add($signature, $table.PrimaryKey)
-            }
-        }
-    }
-
-    [string] GetProcessingName([string] $Signature, [string] $SessionId)
-    {
-        return "SqlSizer_$SessionId." + $Signature
-    }
-
-    [string] GetSliceName([string] $Signature, [string] $SessionId)
-    {
-        return "SqlSizer_$SessionId.Slice" + $Signature
-    }
-
-    [string] GetTablePrimaryKeySignature([TableInfo]$Table)
-    {
-        $result = $Table.SchemaName + "_" + $Table.TableName
-        return $result
-    }
-}
+# end of script
 # SIG # Begin signature block
 # MIIoigYJKoZIhvcNAQcCoIIoezCCKHcCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDXLIWS10LvEb1T
-# 0p58JGEMaW0hYjtbL53BTaD9F5CAQqCCIL4wggXJMIIEsaADAgECAhAbtY8lKt8j
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBNR6A6mquG8hIe
+# zFhUdU+9vMX6QlAoSgwLw3PVh18OUaCCIL4wggXJMIIEsaADAgECAhAbtY8lKt8j
 # AEkoya49fu0nMA0GCSqGSIb3DQEBDAUAMH4xCzAJBgNVBAYTAlBMMSIwIAYDVQQK
 # ExlVbml6ZXRvIFRlY2hub2xvZ2llcyBTLkEuMScwJQYDVQQLEx5DZXJ0dW0gQ2Vy
 # dGlmaWNhdGlvbiBBdXRob3JpdHkxIjAgBgNVBAMTGUNlcnR1bSBUcnVzdGVkIE5l
@@ -491,38 +266,38 @@ class Structure
 # Z25pbmcgMjAyMSBDQQIQYpSo2Nu09IRO7XqaiixN1TANBglghkgBZQMEAgEFAKCB
 # hDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEE
 # AYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJ
-# BDEiBCDdsdYP87AQVXQHfX3ILrU0ih32BR1aH+x49Owys30QKzANBgkqhkiG9w0B
-# AQEFAASCAgCOTm/PS4DuliwSvJouR3prkqL4fX5SdfsOYafl3GUeDZkcFiq50GPa
-# CqEG8hM045u4NhjAhL8Y5vR9+qkBledHMPVOj2NEW5zd2/4JgAjT51yy16UiZUPu
-# ayvA0LoQ57Bd//5ZHl6hL8dfkrrIo9K5SEuvzNBDrcFCaWN80AElKDJeO1T07tiL
-# 9tXHXP1oQrICjJYcsFgsFz1S+LzCEPok6LEN37b4JCTMa0Z57aiavfSwwpf0bmmh
-# oT8KThJG3jI/GjDm+sy7ce7R98jIz53kL75jpkOKGWR1dS9e/gBjxTo8GOxbisc4
-# f01ItXhy+ALE3YZFQBN+/dN6W4/hPf1LX4wOVn+rV4T9myYOdU5mAVA1SG0QDnz8
-# lCvVJ/14WwE0ZWTnyXGxQigPys64oJQ9kltHA39XJlN7o8AuBvXz0ls7cKKaEFIk
-# muTAmpeufv/EBgztB52uRpFoVNE0m+p0nzqQyEJUhefV5iP4kYQhVHSVlVYmtAzf
-# TIcOE3XeYAkfp8CdyMOGHf3vMBrF2QRlUwTXGafpkPjyY98lUcLO7jP9moGHF2uZ
-# OB5zVurOmQUmEK1h7s70jGX77ZwE68vwK5OCozNbW//u6/9Ej76/OiMAgZHDZE8F
-# mcwHAOdXNIWMJoB2Vp8N/3Vh+ffngTaJBBumvuDXtX3n1gus3gNYKKGCBAIwggP+
+# BDEiBCA1x4FrAlKGdZxiiuzEWmUgwzNQyMxOip/x23PeuchyMDANBgkqhkiG9w0B
+# AQEFAASCAgAjgTjnKxgGpsDkbEc8AVL8fpprUOUZQ0puKrk7nSRb3x1ooFvfn7Qw
+# UTxd3epmV2/vYpa0MOeaNtx8rOIzmDnKuBbyTLc5xedrktxGolVVY6+dvR5SYyZQ
+# N+smRlGgZ5jb67QQmK9zrofTF9Ffb+2qSOBCG433zZpR4Q6CVZ1v5HjmlG1wOKxb
+# SMO9dWpNQ+9gYS/WDUdMTurV8RrhfCJe8iMvq+u1UVSOFgargqaMpDkFGzDYowjy
+# mJOy9JNyrYkt8QPcvr2/FErLpGRqpSmMMC133hfZEWounDuGKIsnNILesIL3HoSB
+# WVM/Xz9MIU4nTUIDzBB0kO0AWWHkr5WaXVm3nbQYCjt0ufY2v9MKyMLRGBSrEbYf
+# uritgvrUfLaxjXOXG0OAK2lpc+vgzdQ34m/LtChkT1H15vEzUAoQwyFfUj0lh1Dl
+# Ru1KY+d4vpVQgF+5NpvotL1VpqNJsJ12vvaq5/ISUhgJ28PlWHJ3bq1N0fjilDCI
+# D6LAU2zi5FfO3DXx/Mzc2CDPBfKC+zd0/oqTeHTz17txErjjLXQ7IT961GJoSz/B
+# J1sFZ2r2aWs3PjnrPqftCL6NpKecXJBpTj7t41Te3lcicKwOXiusUITVKRcrxejF
+# gyH4Dq8L2hJpkANyLHvRG35fkBDmq+C4+rbC/tQ0NGTJSjgCmAtARaGCBAIwggP+
 # BgkqhkiG9w0BCQYxggPvMIID6wIBATBqMFYxCzAJBgNVBAYTAlBMMSEwHwYDVQQK
 # ExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMuQS4xJDAiBgNVBAMTG0NlcnR1bSBUaW1l
 # c3RhbXBpbmcgMjAyMSBDQQIQK9SucLnQY1sq6YTI1nSqMDANBglghkgBZQMEAgIF
 # AKCCAVYwGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMBwGCSqGSIb3DQEJBTEP
-# Fw0yMzAyMTgyMzA3NThaMDcGCyqGSIb3DQEJEAIvMSgwJjAkMCIEIAO5mmRJdJhK
-# lbbMXYDTRNB0+972yiQEhCvmzw5EIgeKMD8GCSqGSIb3DQEJBDEyBDBZM61DtitS
-# mAOzoCucwgfdrxQboRnRr4AWVir2odkt7lhUq2qE1LsflKapotX3wGswgZ8GCyqG
+# Fw0yMzAyMTgyMjU5MTJaMDcGCyqGSIb3DQEJEAIvMSgwJjAkMCIEIAO5mmRJdJhK
+# lbbMXYDTRNB0+972yiQEhCvmzw5EIgeKMD8GCSqGSIb3DQEJBDEyBDDL0XxeQRqI
+# vOQz2C7bJ/T35ZUuV9OPZxhoOHCCnej8ztcdBARvDj/EF1Ekuaf+ZocwgZ8GCyqG
 # SIb3DQEJEAIMMYGPMIGMMIGJMIGGBBS/T2vEmC3eFQWo78jHp51NFDUAzjBuMFqk
 # WDBWMQswCQYDVQQGEwJQTDEhMB8GA1UEChMYQXNzZWNvIERhdGEgU3lzdGVtcyBT
 # LkEuMSQwIgYDVQQDExtDZXJ0dW0gVGltZXN0YW1waW5nIDIwMjEgQ0ECECvUrnC5
-# 0GNbKumEyNZ0qjAwDQYJKoZIhvcNAQEBBQAEggIAWxExi4YND1q0NXLN2FG7rg6F
-# 7nUaQvYbcvicGLGHriqWyytQ+hqQzU+JK5iU7iJZbhJMxCdlsqIoRTnmrRtnkMiO
-# 8Kmiv29LSHeK6q0Mz0YBfMnK+a2/e30Kei+D+40pYbc7dM4P5a6aDcd9IqaNhp0I
-# 8cOOuOxhM4dCtcFUeMYNX5yc/LNjRYai3r8ObU7LNhvW8mgI1kkG+g5CF9zTFO2N
-# hBPl6VT+RhI7faPI2ynvcTIwEOqBnXVHm4r20Smb7OzeWwtOFxxesdAkhWzXG+mK
-# pTH1ASRyjxwXZhDhn8cqHVDLWM1FI4TFkNnbzkv7G0Tmu2YW7T2I8i9puz1v3FwT
-# +U/C2qly3mSntkQ8ABNnufoPPLGHXZZT8nqv/ZZs/k/z9GlPmqBNe2oFIQbFjkc3
-# rGaINiB/vR1vzvDgKnIMi4IvxghmbmHQQk1oz1SHpsnRWLZArjQR98iqTUgV67yr
-# 0EbWKacCulOSvDOqttniYeYVpJqgA7DVDiopm1fO+DKuVH7dpKj6UswQaDl9T8pa
-# P3HLzM1S/SXzIssX9tRkuN9k++tP0vaoWywRaONBrfmjeoftXgZA9XwRdZ+FTcOU
-# fBDJRHwY4wn9h366DXvqOgsl3UVjfmdGCLec/n0EncXAevFqh2JWIfMor/AI0gsK
-# mJEppRvqIpYsS7+bjVI=
+# 0GNbKumEyNZ0qjAwDQYJKoZIhvcNAQEBBQAEggIAGYW2GdcAeGhdG5ZAPYunXlwY
+# 5Hn9wVKZNwctDcf8lzgDjwdAm0bU5AS7ocxwr2hHbOKT1PEZ8qYcnLCXoViyVHNa
+# pCuy+K7JSx+ATl6UdX5WBTTBlZXnf2ndjKj67BywWfyz31XpbAYatrf2zbtnlqRp
+# BSL5cqx+nkhN150Vb2Skkd/EX8WswMJAkjdsACXkHHNc8HavVEpYjfk/1p2YlWq4
+# njlkXY3DrAZDouncTGR83N4SQMh09tQCLwXdTtZHP8u/6htw0bQoI31yVIfUamNN
+# YYd+0k2NSmbyLH7kC8HiY+duQQ0yIEqAcjoEJIAz0NnGEIJx5t7yUnZ5O0fPuSto
+# /o1di+YpC2nrdUFQKOpo4JAzrLRHQAglkB2nTA+4FrqZ98rG3Pv7Iihygz8icVEi
+# Vk4uBHlTfmzCdSaUjmCNU/Hh98ilgaMrF2towzSVne3aNBsDIZVutoKMkdl07taj
+# hrdIWuDIgN4UNjnJ2ZL6qzNYNIQcnmHopR/Ce8Uo85c8xeUmQJk7/RZkSRtfNs2l
+# q9U8sfYFUxa8arlz5U3CpjzomZgwJkZTm8oz8PjFAvwBqV++MiEWZV8b0Vpf34cs
+# QQ+FfzttEdVha3DtV+j7LMr7nMCu/GcOntg+Zj6rpPaJ1njcMSB53pQ2FgN/epyC
+# bKYdPKvmfEgG1TL740U=
 # SIG # End signature block
