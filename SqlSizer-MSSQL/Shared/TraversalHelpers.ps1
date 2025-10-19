@@ -67,8 +67,8 @@ function Get-NewTraversalState
             throw [System.ArgumentNullException]::new("Fk", "Foreign key cannot be null")
         }
         
-        Assert-ValidTraversalState $CurrentState
-        Assert-ValidTraversalDirection $Direction
+        $null = Assert-ValidTraversalState $CurrentState
+        $null = Assert-ValidTraversalDirection $Direction
     }
     catch
     {

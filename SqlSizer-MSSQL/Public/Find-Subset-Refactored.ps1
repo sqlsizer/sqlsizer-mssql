@@ -281,187 +281,30 @@ function Find-Subset-Refactored
                 $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
                 $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
 
-                # Build CTE-based query
-                $query = $this.BuildTraversalQueryCTE(
-                    $processing, 
-                    $targetProcessing, 
-                    $Table, 
-                    $targetTableInfo, 
-                    $fk, 
-                    $Direction,
-                    $newState,
-                    $tableId,
-                    $targetTableId,
-                    $fkId,
-                    $constraints,
-                    $Iteration
-                )
+                # Build CTE-based query using shared function
+                $query = New-CTETraversalQuery `
+                    -SourceProcessing $processing `
+                    -TargetProcessing $targetProcessing `
+                    -SourceTable $Table `
+                    -TargetTable $targetTableInfo `
+                    -Fk $fk `
+                    -Direction $Direction `
+                    -NewState $newState `
+                    -SourceTableId $tableId `
+                    -TargetTableId $targetTableId `
+                    -FkId $fkId `
+                    -Constraints $constraints `
+                    -Iteration $Iteration `
+                    -SessionId $SessionId `
+                    -MaxBatchSize $MaxBatchSize `
+                    -FullSearch $FullSearch `
+                    -IsSynapse $ConnectionInfo.IsSynapse
 
                 $result += $query
             }
         }
 
         return $result
-    }
-
-    function BuildTraversalQueryCTE
-    {
-        <#
-        .SYNOPSIS
-            Builds a CTE-based traversal query (much cleaner than nested queries).
-        #>
-        param
-        (
-            [string]$SourceProcessing,
-            [string]$TargetProcessing,
-            [TableInfo]$SourceTable,
-            [TableInfo]$TargetTable,
-            [TableFk]$Fk,
-            [TraversalDirection]$Direction,
-            [TraversalState]$NewState,
-            [int]$SourceTableId,
-            [int]$TargetTableId,
-            [int]$FkId,
-            [hashtable]$Constraints,
-            [int]$Iteration
-        )
-
-        # Build column mappings based on direction
-        if ($Direction -eq [TraversalDirection]::Outgoing)
-        {
-            $sourceColumns = $SourceTable.PrimaryKey
-            $targetColumns = $Fk.FkColumns
-            $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
-                "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
-            }
-        }
-        else # Incoming
-        {
-            $sourceColumns = $Fk.FkColumns
-            $targetColumns = $TargetTable.PrimaryKey
-            $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
-                "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
-            }
-        }
-
-        $joinClause = $joinConditions -join " AND "
-
-        # Build select list for target keys
-        $targetKeySelect = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
-            $col = $targetColumns[$i]
-            (Get-ColumnValue -ColumnName $col.Name -Prefix "tgt." -DataType $col.DataType) + " AS Key$i"
-        }
-        $targetKeyList = $targetKeySelect -join ", "
-
-        # Build NOT EXISTS check
-        $notExistsConditions = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
-            "existing.Key$i = tgt.Key$i"
-        }
-        $notExistsClause = $notExistsConditions -join " AND "
-
-        # Additional constraints
-        $additionalWhere = @()
-        
-        # MaxDepth constraint: Limits how deep we traverse from the SOURCE table
-        # The Depth value in SourceRecords represents "depth from initial seed data"
-        # If MaxDepth is set on the target table, we check if we've already gone too deep
-        if ($null -ne $Constraints.MaxDepth)
-        {
-            # Note: src.Depth is the depth of the SOURCE record
-            # src.Depth + 1 would be the depth of the TARGET record
-            # We check src.Depth to prevent creating records beyond MaxDepth
-            $additionalWhere += "src.Depth < $($Constraints.MaxDepth)"
-        }
-
-        # Prevent cycles in non-full search
-        if (-not $FullSearch)
-        {
-            $additionalWhere += "((src.Fk <> $FkId) OR (src.Fk IS NULL))"
-        }
-
-        $whereClause = if ($additionalWhere.Count -gt 0) {
-            "AND " + ($additionalWhere -join " AND ")
-        } else {
-            ""
-        }
-
-        # TOP clause priority:
-        # 1. MaxBatchSize (global limit per query execution) - overrides everything
-        # 2. Constraints.Top (per-table or per-FK limit) - table-specific limit
-        # 3. No limit - retrieve all matching records
-        $topClause = ""
-        if ($MaxBatchSize -ne -1)
-        {
-            # Global batch limit takes precedence to prevent overwhelming queries
-            $topClause = "TOP ($MaxBatchSize)"
-        }
-        elseif ($null -ne $Constraints.Top)
-        {
-            # Table-specific constraint limits records for this relationship
-            $topClause = "TOP ($($Constraints.Top))"
-        }
-
-        # CTE-based query (cleaner and more maintainable)
-        $query = @"
--- Traverse $(if ($Direction -eq [TraversalDirection]::Outgoing) { 'OUTGOING' } else { 'INCOMING' }) FK: $($Fk.Name)
-WITH SourceRecords AS (
-    SELECT Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Depth, Fk
-    FROM $SourceProcessing src
-    WHERE src.Iteration IN (
-        SELECT FoundIteration 
-        FROM SqlSizer.Operations 
-        WHERE Status = 0 AND SessionId = '$SessionId'
-    )
-),
-NewRecords AS (
-    SELECT DISTINCT $topClause
-        $targetKeyList,
-        src.Depth + 1 AS Depth
-    FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN SourceRecords src ON $joinClause
-    WHERE $($targetColumns[0].Name) IS NOT NULL
-        $whereClause
-        AND NOT EXISTS (
-            SELECT 1 
-            FROM $TargetProcessing existing 
-            WHERE existing.Color = $([int]$NewState)
-                AND $notExistsClause
-        )
-)
-INSERT INTO $TargetProcessing (Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Color, Source, Depth, Fk, Iteration)
-SELECT *, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
-FROM NewRecords;
-
--- Update operations table
-INSERT INTO SqlSizer.Operations (
-    [Table], Color, ToProcess, Processed, Status, Source, Fk, Depth, 
-    FoundDate, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
-)
-SELECT 
-    $TargetTableId, 
-    $([int]$NewState), 
-    COUNT(*), 
-    0, 
-    NULL, 
-    $SourceTableId, 
-    $FkId, 
-    Depth, 
-    GETDATE(), 
-    NULL, 
-    '$SessionId', 
-    $Iteration, 
-    NULL
-FROM NewRecords
-GROUP BY Depth;
-
-"@
-
-        if (-not $ConnectionInfo.IsSynapse)
-        {
-            $query += "`nGO`n"
-        }
-
-        return $query
     }
 
     function Invoke-TraversalOperation

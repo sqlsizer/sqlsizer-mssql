@@ -10,7 +10,9 @@
 BeforeAll {
     # Import the module
     $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1" -Force
+    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
+    
+    . "$modulePath\SqlSizer-MSSQL\Shared\Get-ColumnValue.ps1"
 }
 
 Describe 'New-GetNextOperationQuery' {
@@ -245,7 +247,6 @@ Describe 'New-PendingResolutionQuery' {
                 [PSCustomObject]@{ Name = 'OrderType' }
             )
         }
-        $mockTableInfo.PSObject.TypeNames.Insert(0, 'TableInfo')
     }
 
     It 'Generates query for non-Synapse' {
@@ -276,7 +277,7 @@ Describe 'New-PendingResolutionQuery' {
             -IsSynapse $false
 
         # Pending state = 2, Include state = 1
-        $result | Should -Match 'pending\.Color = 2'
+        $result | Should -Match 'pending\.Color = 3'
         $result | Should -Match 'SET Color = 1'
     }
 
@@ -329,7 +330,6 @@ Describe 'New-ExcludePendingQuery' {
             SchemaName = 'dbo'
             TableName  = 'Orders'
         }
-        $mockTableInfo.PSObject.TypeNames.Insert(0, 'TableInfo')
     }
 
     It 'Updates Pending to Exclude' {
@@ -338,9 +338,9 @@ Describe 'New-ExcludePendingQuery' {
             -TableInfo $mockTableInfo `
             -IsSynapse $false
 
-        # Pending state = 2, Exclude state = 0
-        $result | Should -Match 'SET Color = 0'
-        $result | Should -Match 'WHERE Color = 2'
+        # Pending state = 3, Exclude state = 2
+        $result | Should -Match 'SET Color = 2'
+        $result | Should -Match 'WHERE Color = 3'
     }
 
     It 'Uses correct processing table' {
@@ -389,23 +389,52 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             TableName  = 'Customers'
             PrimaryKey = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })
         }
-        $mockSourceTable.PSObject.TypeNames.Insert(0, 'TableInfo')
 
         $mockTargetTable = [PSCustomObject]@{
             SchemaName = 'dbo'
             TableName  = 'Orders'
             PrimaryKey = @([PSCustomObject]@{ Name = 'OrderID'; DataType = 'int' })
         }
-        $mockTargetTable.PSObject.TypeNames.Insert(0, 'TableInfo')
 
         $mockFk = [PSCustomObject]@{
             Name      = 'FK_Orders_Customers'
             FkColumns = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })
         }
-        $mockFk.PSObject.TypeNames.Insert(0, 'TableFk')
+
+        # Create mock tables with multiple columns for dynamic key testing
+        $mockSourceTableMultiKey = [PSCustomObject]@{
+            SchemaName = 'dbo'
+            TableName  = 'CompositeKeyTable'
+            PrimaryKey = @(
+                [PSCustomObject]@{ Name = 'Key1'; DataType = 'int' },
+                [PSCustomObject]@{ Name = 'Key2'; DataType = 'varchar' },
+                [PSCustomObject]@{ Name = 'Key3'; DataType = 'uniqueidentifier' }
+            )
+        }
+
+        $mockTargetTableMultiKey = [PSCustomObject]@{
+            SchemaName = 'dbo'
+            TableName  = 'RelatedTable'
+            PrimaryKey = @(
+                [PSCustomObject]@{ Name = 'RelatedKey1'; DataType = 'int' },
+                [PSCustomObject]@{ Name = 'RelatedKey2'; DataType = 'varchar' }
+            )
+        }
+
+        $mockFkMultiColumn = [PSCustomObject]@{
+            Name      = 'FK_Related_Composite'
+            FkColumns = @(
+                [PSCustomObject]@{ Name = 'FkKey1'; DataType = 'int' },
+                [PSCustomObject]@{ Name = 'FkKey2'; DataType = 'varchar' }
+            )
+        }
 
         # Mock Get-ColumnValue function
         Mock Get-ColumnValue { return "tgt.$ColumnName" }
+        
+        # Mock helper functions that might be called
+        Mock Get-AdditionalWhereConditions { return @() }
+        Mock Get-TopClause { return "" }
     }
 
     It 'Includes CTE structure' {
@@ -561,5 +590,150 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -IsSynapse $true
 
         $result | Should -Not -Match '\nGO\n'
+    }
+
+    Context 'Dynamic Key Column Generation' {
+        It 'Generates single key column for single PK' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable `
+                -TargetTable $mockTargetTable `
+                -Fk $mockFk `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # Should have Key0 in SourceRecords
+            $result | Should -Match 'SELECT Key0, Depth, Fk'
+            # Should NOT have hardcoded Key1, Key2, etc.
+            $result | Should -Not -Match 'Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7'
+        }
+
+        It 'Generates multiple key columns for composite PK in source' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTableMultiKey `
+                -TargetTable $mockTargetTableMultiKey `
+                -Fk $mockFkMultiColumn `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # For outgoing, source columns = PK (3 columns), target columns = FK columns (2 columns)
+            # SourceRecords should have Key0, Key1, Key2
+            $result | Should -Match 'SELECT Key0, Key1, Key2, Depth, Fk'
+        }
+
+        It 'Generates correct INSERT column list for single key' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable `
+                -TargetTable $mockTargetTable `
+                -Fk $mockFk `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # INSERT should only list Key0 (since FK has 1 column)
+            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Color, Source, Depth, Fk, Iteration\)'
+        }
+
+        It 'Generates correct INSERT column list for composite key' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTableMultiKey `
+                -TargetTable $mockTargetTableMultiKey `
+                -Fk $mockFkMultiColumn `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # For outgoing: target columns = FK columns (2 columns)
+            # INSERT should list Key0, Key1
+            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Key1, Color, Source, Depth, Fk, Iteration\)'
+        }
+
+        It 'Does not include hardcoded 8-column key list' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTableMultiKey `
+                -TargetTable $mockTargetTableMultiKey `
+                -Fk $mockFkMultiColumn `
+                -Direction ([TraversalDirection]::Incoming) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # Should NOT have the old hardcoded 8-column pattern
+            $result | Should -Not -Match 'Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Depth, Fk'
+        }
+
+        It 'Handles incoming direction with different key columns' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTableMultiKey `
+                -TargetTable $mockTargetTableMultiKey `
+                -Fk $mockFkMultiColumn `
+                -Direction ([TraversalDirection]::Incoming) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{} `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false `
+                -IsSynapse $false
+
+            # For incoming: source columns = FK columns (2), target columns = target PK (2)
+            # SourceRecords should have Key0, Key1
+            $result | Should -Match 'SELECT Key0, Key1, Depth, Fk'
+        }
     }
 }

@@ -115,13 +115,19 @@ function New-CTETraversalQuery
     # Get TOP clause
     $topClause = Get-TopClause -MaxBatchSize $MaxBatchSize -Constraints $Constraints
 
+    # Build source key list for SourceRecords CTE
+    $sourceKeyList = (0..($sourceColumns.Count - 1) | ForEach-Object { "Key$_" }) -join ", "
+    
+    # Build target key list for INSERT
+    $targetKeyListForInsert = (0..($targetColumns.Count - 1) | ForEach-Object { "Key$_" }) -join ", "
+
     # Build the query
     $directionLabel = if ($Direction -eq [TraversalDirection]::Outgoing) { 'OUTGOING' } else { 'INCOMING' }
     
     $query = @"
 -- Traverse $directionLabel FK: $($Fk.Name)
 WITH SourceRecords AS (
-    SELECT Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Depth, Fk
+    SELECT $sourceKeyList, Depth, Fk
     FROM $SourceProcessing src
     WHERE src.Iteration IN (
         SELECT FoundIteration 
@@ -144,7 +150,7 @@ NewRecords AS (
                 AND $notExistsClause
         )
 )
-INSERT INTO $TargetProcessing (Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Color, Source, Depth, Fk, Iteration)
+INSERT INTO $TargetProcessing ($targetKeyListForInsert, Color, Source, Depth, Fk, Iteration)
 SELECT *, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
 

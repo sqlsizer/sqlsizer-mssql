@@ -14,7 +14,7 @@
 
     $connection = New-Object -TypeName SqlConnectionInfo
     $connection.Server = $Server
-    $connection.EncryptConnection = $EncryptConnection
+    #$connection.EncryptConnection = $EncryptConnection
     $connection.Statistics = New-Object -Type SqlConnectionStatistics
     $connection.IsSynapse = $IsSynapse
 
