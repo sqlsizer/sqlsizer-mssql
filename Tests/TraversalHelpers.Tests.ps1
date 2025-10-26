@@ -8,16 +8,11 @@
 #>
 
 BeforeAll {
-    # Import the module
-    $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1" -Force -Verbose
-    
-    # Mock classes for testing (adjust based on your actual type definitions)
-    # These are needed if the types aren't already loaded
 }
 
 Describe 'Get-NewTraversalState' {
     BeforeAll {
+       
         # Create mock FK object
         $mockFk = [PSCustomObject]@{
             Schema    = 'dbo'

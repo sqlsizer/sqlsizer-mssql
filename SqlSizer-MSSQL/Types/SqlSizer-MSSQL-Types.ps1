@@ -14,6 +14,28 @@ enum ForeignKeyRule
     SetNull = 3
     SetDefault = 4
 }
+# Enhanced types for the refactored Find-Subset algorithm
+
+enum TraversalState
+{
+    # Record should be included in subset (was Color.Green)
+    Include = 1
+    
+    # Record should be excluded from subset (was Color.Red)  
+    Exclude = 2
+    
+    # Record needs evaluation - reachable but inclusion undecided (was Color.Yellow)
+    Pending = 3
+    
+    # Only process incoming FKs (was Color.Blue)
+    InboundOnly = 4
+}
+
+enum TraversalDirection
+{
+    Outgoing = 1  # Follow FKs from current table to referenced tables
+    Incoming = 2  # Follow FKs from tables that reference current table
+}
 
 class ColorMap
 {
@@ -308,28 +330,6 @@ class Structure
     }
 }
 
-# Enhanced types for the refactored Find-Subset algorithm
-
-enum TraversalState
-{
-    # Record should be included in subset (was Color.Green)
-    Include = 1
-    
-    # Record should be excluded from subset (was Color.Red)  
-    Exclude = 2
-    
-    # Record needs evaluation - reachable but inclusion undecided (was Color.Yellow)
-    Pending = 3
-    
-    # Only process incoming FKs (was Color.Blue)
-    InboundOnly = 4
-}
-
-enum TraversalDirection
-{
-    Outgoing = 1  # Follow FKs from current table to referenced tables
-    Incoming = 2  # Follow FKs from tables that reference current table
-}
 
 class TraversalOperation
 {
