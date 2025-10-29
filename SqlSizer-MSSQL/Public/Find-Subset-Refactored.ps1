@@ -97,12 +97,13 @@ function Find-Subset-Refactored
         foreach ($rel in $relationships)
         {
             # For incoming, we need to iterate through FKs that point to current table
+            # For outgoing, $rel is already a single FK from $Table.ForeignKeys
             $fks = if ($Direction -eq [TraversalDirection]::Incoming) {
                 $rel.ForeignKeys | Where-Object { 
                     ($_.Schema -eq $Table.SchemaName) -and ($_.Table -eq $Table.TableName) 
                 }
             } else {
-                @($rel.ForeignKeys)
+                @($rel)  # Wrap single FK in array for consistent iteration
             }
 
             foreach ($fk in $fks)
@@ -601,7 +602,6 @@ WHERE SessionId = '$SessionId'
     # Initialize metadata
     $structure = [Structure]::new($DatabaseInfo)
     $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
-    $script:tablesGroupedById = $sqlSizerInfo.Tables | Group-Object -Property Id -AsHashTable -AsString
     $script:tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
     $script:fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
 
