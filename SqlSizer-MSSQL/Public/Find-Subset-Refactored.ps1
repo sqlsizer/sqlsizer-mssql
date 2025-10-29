@@ -282,7 +282,6 @@ function Find-Subset-Refactored
             {
                 $signature = $structure.Tables[$table]
                 $processing = $structure.GetProcessingName($signature, $SessionId)
-                $tableId = $tablesGroupedByName["$($table.SchemaName), $($table.TableName)"].Id
 
                 $pendingState = [int][TraversalState]::Pending
                 $includeState = [int][TraversalState]::Include
@@ -313,6 +312,7 @@ WHERE pending.Color = $pendingState
     );
 
 SET @Changed = @@ROWCOUNT;
+SELECT @Changed AS Changed;
 "@
 
                 if (-not $ConnectionInfo.IsSynapse)
@@ -379,7 +379,7 @@ WHERE Color = $pendingState;
             # DFS: Process by count (deepest/most records first)
             $query = @"
 SELECT TOP 1
-    o.[Table],
+    o.[Table] AS TableId,
     t.[Schema] AS TableSchema,
     t.TableName,
     o.Color AS State,
@@ -432,7 +432,7 @@ ORDER BY o.Depth ASC, RemainingRecords DESC
         return $operation
     }
 
-    function Mark-OperationInProgress
+    function Set-OperationInProgress
     {
         <#
         .SYNOPSIS
@@ -577,7 +577,7 @@ WHERE SessionId = '$SessionId'
         }
 
         # Mark as in-progress
-        Mark-OperationInProgress -Operation $operation
+        Set-OperationInProgress -Operation $operation
 
         # Execute traversal
         Invoke-TraversalOperation -Operation $operation -Iteration $Iteration
