@@ -30,7 +30,7 @@ function Assert-NotNull
         [Parameter(Mandatory = $true, Position = 1)]
         [string]$ParameterName,
         
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, Position = 2)]
         [string]$Message
     )
     
@@ -236,9 +236,9 @@ function Assert-ValidTable
         [bool]$RequirePrimaryKey = $true
     )
     
-    Assert-NotNullOrEmpty $SchemaName "SchemaName"
-    Assert-NotNullOrEmpty $TableName "TableName"
-    Assert-NotNull $DatabaseInfo "DatabaseInfo"
+    $null = Assert-NotNullOrEmpty $SchemaName "SchemaName"
+    $null = Assert-NotNullOrEmpty $TableName "TableName"
+    $null = Assert-NotNull $DatabaseInfo "DatabaseInfo"
     
     $table = $DatabaseInfo.Tables | Where-Object {
         ($_.SchemaName -eq $SchemaName) -and ($_.TableName -eq $TableName)
@@ -279,7 +279,7 @@ function Assert-ValidSessionId
         [string]$SessionId
     )
     
-    Assert-NotNullOrEmpty $SessionId "SessionId"
+    $null = Assert-NotNullOrEmpty $SessionId "SessionId"
     
     # SessionId should not contain special characters that could break SQL
     if ($SessionId -match "[';]")
@@ -317,8 +317,8 @@ function Assert-ValidConnectionInfo
         [SqlConnectionInfo]$ConnectionInfo
     )
     
-    Assert-NotNull $ConnectionInfo "ConnectionInfo"
-    Assert-NotNullOrEmpty $ConnectionInfo.Server "ConnectionInfo.Server"
+    $null = Assert-NotNull $ConnectionInfo "ConnectionInfo"
+    $null = Assert-NotNullOrEmpty $ConnectionInfo.Server "ConnectionInfo.Server"
     
     # Must have either AccessToken or Credential
     if ([string]::IsNullOrEmpty($ConnectionInfo.AccessToken) -and $null -eq $ConnectionInfo.Credential)
@@ -346,7 +346,7 @@ function Test-TableHasPrimaryKey
         [TableInfo]$Table
     )
     
-    Assert-NotNull $Table "Table"
+    $null = Assert-NotNull $Table "Table"
     return $Table.PrimaryKey.Count -gt 0
 }
 

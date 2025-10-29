@@ -66,154 +66,6 @@ function Find-Subset-Refactored
     $queryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string]]"
     #region Helper Functions
 
-    function Get-NewTraversalState
-    {
-        <#
-        .SYNOPSIS
-            Determines the new state when traversing a relationship.
-        #>
-        param
-        (
-            [TraversalDirection]$Direction,
-            [TraversalState]$CurrentState,
-            [TableFk]$Fk,
-            [TraversalConfiguration]$TraversalConfiguration
-        )
-
-        $newState = $CurrentState
-
-        # Default state transitions
-        if ($Direction -eq [TraversalDirection]::Outgoing)
-        {
-            # When traversing outgoing FKs (dependencies):
-            # Include -> Include (include referenced data)
-            # Exclude -> DO NOT TRAVERSE (exclusion is local, not propagated)
-            # Pending -> Pending (propagate uncertainty to dependencies)
-            if ($CurrentState -eq [TraversalState]::Include) {
-                $newState = [TraversalState]::Include
-            }
-            elseif ($CurrentState -eq [TraversalState]::Pending) {
-                $newState = [TraversalState]::Pending
-            }
-            else {
-                # Exclude state: do not propagate (handled by Should-TraverseDirection)
-                $newState = [TraversalState]::Exclude
-            }
-        }
-        elseif ($Direction -eq [TraversalDirection]::Incoming)
-        {
-            if ($CurrentState -eq [TraversalState]::Include)
-            {
-                $newState = if ($FullSearch) { 
-                    [TraversalState]::Include 
-                } else { 
-                    [TraversalState]::Pending 
-                }
-            }
-            # Pending and Exclude do not traverse incoming (handled by Should-TraverseDirection)
-        }
-
-        # Apply TraversalConfiguration overrides if specified
-        if ($null -ne $TraversalConfiguration)
-        {
-            $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Schema } else { $Fk.FkSchema }
-            $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
-            
-            $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
-            
-            if ($null -ne $item -and $null -ne $item.StateOverride)
-            {
-                # Use the forced state from StateOverride
-                $newState = $item.StateOverride.State
-            }
-        }
-
-        return $newState
-    }
-
-    function Get-TraversalConstraints
-    {
-        <#
-        .SYNOPSIS
-            Gets traversal constraints (MaxDepth, Top) from TraversalConfiguration.
-        .DESCRIPTION
-            Retrieves constraints that limit FK traversal:
-            - MaxDepth: Limits traversal depth from the SOURCE table (where we're starting from)
-            - Top: Limits number of records to retrieve via this specific FK relationship
-            
-            Constraints are looked up for the TARGET table (where we're going to),
-            which allows users to say "limit data retrieved INTO this table".
-        #>
-        param
-        (
-            [TableFk]$Fk,
-            [TraversalDirection]$Direction,
-            [TraversalConfiguration]$TraversalConfiguration
-        )
-
-        $result = @{
-            MaxDepth = $null
-            Top      = $null
-        }
-
-        if ($null -ne $TraversalConfiguration)
-        {
-            # Lookup constraints for the TARGET table (where we're traversing TO)
-            # This allows configuration like "limit records going into CustomerAddress table"
-            $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Schema } else { $Fk.FkSchema }
-            $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
-            
-            $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
-            
-            if ($null -ne $item -and $null -ne $item.Constraints)
-            {
-                if ($item.Constraints.MaxDepth -ne -1)
-                {
-                    $result.MaxDepth = $item.Constraints.MaxDepth
-                }
-                if ($item.Constraints.Top -ne -1)
-                {
-                    $result.Top = $item.Constraints.Top
-                }
-            }
-        }
-
-        return $result
-    }
-
-    function Should-TraverseDirection
-    {
-        <#
-        .SYNOPSIS
-            Determines if we should traverse in a given direction for a state.
-        #>
-        param
-        (
-            [TraversalState]$State,
-            [TraversalDirection]$Direction
-        )
-
-        if ($Direction -eq [TraversalDirection]::Outgoing)
-        {
-            # Traverse outgoing FKs (dependencies) for:
-            # - Include: ALWAYS traverse to find referenced data
-            # - Pending: to find dependencies (IMPORTANT!)
-            # - Exclude: NO! Exclusion is local, not propagated
-            return ($State -eq [TraversalState]::Include) -or 
-                   ($State -eq [TraversalState]::Pending)
-        }
-        else # Incoming
-        {
-            # Traverse incoming FKs (dependents) for:
-            # - Include: to find dependent data
-            # - InboundOnly: only incoming
-            # - Pending: NO! (to avoid infinite expansion)
-            # - Exclude: NO! (exclusion is local)
-            return ($State -eq [TraversalState]::Include) -or 
-                   ($State -eq [TraversalState]::InboundOnly)
-        }
-    }
-
     function New-TraversalQuery
     {
         <#
@@ -264,7 +116,7 @@ function Find-Subset-Refactored
                     continue
                 }
 
-                $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration
+                $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration -FullSearch $FullSearch
                 $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
 
                 $targetTableInfo = $DatabaseInfo.Tables | Where-Object { 
@@ -329,8 +181,8 @@ function Find-Subset-Refactored
                        -PercentComplete $percentComplete
 
         # Check which directions to traverse
-        $traverseOutgoing = Should-TraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing)
-        $traverseIncoming = Should-TraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming)
+        $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing)
+        $traverseIncoming = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming)
 
         # Execute outgoing traversal
         if ($traverseOutgoing)

@@ -13,16 +13,14 @@ BeforeAll {
 Describe 'Get-NewTraversalState' {
     BeforeAll {
        
-        # Create mock FK object
-        $mockFk = [PSCustomObject]@{
-            Schema    = 'dbo'
-            Table     = 'Orders'
-            FkSchema  = 'dbo'
-            FkTable   = 'Customers'
-            Name      = 'FK_Orders_Customers'
-            FkColumns = @()
-        }
-        $mockFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        # Create TableFk object
+        $mockFk = New-Object TableFk
+        $mockFk.Schema = 'dbo'
+        $mockFk.Table = 'Orders'
+        $mockFk.FkSchema = 'dbo'
+        $mockFk.FkTable = 'Customers'
+        $mockFk.Name = 'FK_Orders_Customers'
+        $mockFk.FkColumns = New-Object 'System.Collections.Generic.List[ColumnInfo]'
     }
 
     Context 'Outgoing Direction' {
@@ -101,37 +99,30 @@ Describe 'Get-NewTraversalState' {
 
     Context 'TraversalConfiguration Override' {
         It 'Applies StateOverride when configuration is provided' {
-            # Mock TraversalConfiguration
-            $mockConfig = [PSCustomObject]@{} | Add-Member -MemberType ScriptMethod -Name GetItemForTable -Value {
-                param($schema, $table)
-                return [PSCustomObject]@{
-                    StateOverride = [PSCustomObject]@{
-                        State = [TraversalState]::Exclude
-                    }
-                }
-            } -PassThru
+            # Create TraversalConfiguration with StateOverride
+            $config = New-Object TraversalConfiguration
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            $rule.StateOverride = New-Object StateOverride -ArgumentList ([TraversalState]::Exclude)
+            $config.Rules = @($rule)
 
             $result = Get-NewTraversalState `
                 -Direction ([TraversalDirection]::Outgoing) `
                 -CurrentState ([TraversalState]::Include) `
                 -Fk $mockFk `
-                -TraversalConfiguration $mockConfig `
+                -TraversalConfiguration $config `
                 -FullSearch $false
 
             $result | Should -Be ([TraversalState]::Exclude)
         }
 
         It 'Uses default state when no override is configured' {
-            $mockConfig = [PSCustomObject]@{} | Add-Member -MemberType ScriptMethod -Name GetItemForTable -Value {
-                param($schema, $table)
-                return $null
-            } -PassThru
+            $config = New-Object TraversalConfiguration
 
             $result = Get-NewTraversalState `
                 -Direction ([TraversalDirection]::Outgoing) `
                 -CurrentState ([TraversalState]::Include) `
                 -Fk $mockFk `
-                -TraversalConfiguration $mockConfig `
+                -TraversalConfiguration $config `
                 -FullSearch $false
 
             $result | Should -Be ([TraversalState]::Include)
@@ -141,13 +132,11 @@ Describe 'Get-NewTraversalState' {
 
 Describe 'Get-TraversalConstraints' {
     BeforeAll {
-        $mockFk = [PSCustomObject]@{
-            Schema    = 'dbo'
-            Table     = 'Orders'
-            FkSchema  = 'dbo'
-            FkTable   = 'Customers'
-        }
-        $mockFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        $mockFk = New-Object TableFk
+        $mockFk.Schema = 'dbo'
+        $mockFk.Table = 'Orders'
+        $mockFk.FkSchema = 'dbo'
+        $mockFk.FkTable = 'Customers'
     }
 
     It 'Returns null constraints when no configuration provided' {
@@ -160,60 +149,51 @@ Describe 'Get-TraversalConstraints' {
     }
 
     It 'Returns MaxDepth when configured' {
-        $mockConfig = [PSCustomObject]@{} | Add-Member -MemberType ScriptMethod -Name GetItemForTable -Value {
-            param($schema, $table)
-            return [PSCustomObject]@{
-                Constraints = [PSCustomObject]@{
-                    MaxDepth = 3
-                    Top      = -1
-                }
-            }
-        } -PassThru
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.Constraints = New-Object TraversalConstraints
+        $rule.Constraints.MaxDepth = 3
+        $rule.Constraints.Top = -1
+        $config.Rules = @($rule)
 
         $result = Get-TraversalConstraints `
             -Fk $mockFk `
             -Direction ([TraversalDirection]::Outgoing) `
-            -TraversalConfiguration $mockConfig
+            -TraversalConfiguration $config
 
         $result.MaxDepth | Should -Be 3
         $result.Top | Should -BeNullOrEmpty
     }
 
     It 'Returns Top when configured' {
-        $mockConfig = [PSCustomObject]@{} | Add-Member -MemberType ScriptMethod -Name GetItemForTable -Value {
-            param($schema, $table)
-            return [PSCustomObject]@{
-                Constraints = [PSCustomObject]@{
-                    MaxDepth = -1
-                    Top      = 100
-                }
-            }
-        } -PassThru
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.Constraints = New-Object TraversalConstraints
+        $rule.Constraints.MaxDepth = -1
+        $rule.Constraints.Top = 100
+        $config.Rules = @($rule)
 
         $result = Get-TraversalConstraints `
             -Fk $mockFk `
             -Direction ([TraversalDirection]::Outgoing) `
-            -TraversalConfiguration $mockConfig
+            -TraversalConfiguration $config
 
         $result.MaxDepth | Should -BeNullOrEmpty
         $result.Top | Should -Be 100
     }
 
     It 'Returns both MaxDepth and Top when both configured' {
-        $mockConfig = [PSCustomObject]@{} | Add-Member -MemberType ScriptMethod -Name GetItemForTable -Value {
-            param($schema, $table)
-            return [PSCustomObject]@{
-                Constraints = [PSCustomObject]@{
-                    MaxDepth = 5
-                    Top      = 50
-                }
-            }
-        } -PassThru
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.Constraints = New-Object TraversalConstraints
+        $rule.Constraints.MaxDepth = 5
+        $rule.Constraints.Top = 50
+        $config.Rules = @($rule)
 
         $result = Get-TraversalConstraints `
             -Fk $mockFk `
             -Direction ([TraversalDirection]::Outgoing) `
-            -TraversalConfiguration $mockConfig
+            -TraversalConfiguration $config
 
         $result.MaxDepth | Should -Be 5
         $result.Top | Should -Be 50
@@ -319,13 +299,27 @@ Describe 'Get-TopClause' {
 
 Describe 'Get-ForeignKeyRelationships' {
     BeforeAll {
-        $mockTable = [PSCustomObject]@{
-            SchemaName     = 'dbo'
-            TableName      = 'Orders'
-            ForeignKeys    = @('FK1', 'FK2')
-            IsReferencedBy = @('FK3', 'FK4')
-        }
-        $mockTable.PSObject.TypeNames.Insert(0, 'TableInfo')
+        $mockTable = New-Object TableInfo
+        $mockTable.SchemaName = 'dbo'
+        $mockTable.TableName = 'Orders'
+        
+        # Create ForeignKeys list with actual TableFk objects
+        $mockTable.ForeignKeys = New-Object 'System.Collections.Generic.List[TableFk]'
+        $fk1 = New-Object TableFk
+        $fk1.Name = 'FK1'
+        $fk2 = New-Object TableFk
+        $fk2.Name = 'FK2'
+        $mockTable.ForeignKeys.Add($fk1)
+        $mockTable.ForeignKeys.Add($fk2)
+        
+        # Create IsReferencedBy list with actual TableInfo objects 
+        $mockTable.IsReferencedBy = New-Object 'System.Collections.Generic.List[TableInfo]'
+        $fk3 = New-Object TableInfo
+        $fk3.TableName = 'T1'
+        $fk4 = New-Object TableInfo
+        $fk4.TableName = 'T2'
+        $mockTable.IsReferencedBy.Add($fk3)
+        $mockTable.IsReferencedBy.Add($fk4)
     }
 
     It 'Returns ForeignKeys for Outgoing direction' {
@@ -334,8 +328,8 @@ Describe 'Get-ForeignKeyRelationships' {
             -Direction ([TraversalDirection]::Outgoing)
 
         $result | Should -HaveCount 2
-        $result[0] | Should -Be 'FK1'
-        $result[1] | Should -Be 'FK2'
+        $result[0].Name | Should -Be 'FK1'
+        $result[1].Name | Should -Be 'FK2'
     }
 
     It 'Returns IsReferencedBy for Incoming direction' {
@@ -344,20 +338,18 @@ Describe 'Get-ForeignKeyRelationships' {
             -Direction ([TraversalDirection]::Incoming)
 
         $result | Should -HaveCount 2
-        $result[0] | Should -Be 'FK3'
-        $result[1] | Should -Be 'FK4'
+        $result[0].TableName | Should -Be 'T1'
+        $result[1].TableName | Should -Be 'T2'
     }
 }
 
 Describe 'Get-TargetTableInfo' {
     BeforeAll {
-        $mockFk = [PSCustomObject]@{
-            Schema   = 'dbo'
-            Table    = 'Orders'
-            FkSchema = 'dbo'
-            FkTable  = 'Customers'
-        }
-        $mockFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        $mockFk = New-Object TableFk
+        $mockFk.Schema = 'dbo'
+        $mockFk.Table = 'Orders'
+        $mockFk.FkSchema = 'dbo'
+        $mockFk.FkTable = 'Customers'
     }
 
     It 'Returns target table info for Outgoing direction' {
@@ -382,12 +374,9 @@ Describe 'Get-TargetTableInfo' {
 Describe 'Test-ShouldSkipTable' {
     It 'Returns true when table is in ignored list' {
         $ignoredTables = @(
-            [PSCustomObject]@{ SchemaName = 'dbo'; TableName = 'IgnoredTable' }
+            [TableInfo2]@{ SchemaName = 'dbo'; TableName = 'IgnoredTable' }
         )
         
-        # Mock the IsIgnored static method
-        Mock -CommandName ([TableInfo2]::IsIgnored) -MockWith { $true }
-
         $result = Test-ShouldSkipTable `
             -Schema 'dbo' `
             -Table 'IgnoredTable' `
@@ -397,8 +386,6 @@ Describe 'Test-ShouldSkipTable' {
     }
 
     It 'Returns true when TableInfo is null' {
-        Mock -CommandName ([TableInfo2]::IsIgnored) -MockWith { $false }
-
         $result = Test-ShouldSkipTable `
             -Schema 'dbo' `
             -Table 'Orders' `
@@ -408,14 +395,10 @@ Describe 'Test-ShouldSkipTable' {
     }
 
     It 'Returns true when table has no primary key' {
-        Mock -CommandName ([TableInfo2]::IsIgnored) -MockWith { $false }
-
-        $mockTableInfo = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'Orders'
-            PrimaryKey = @()
-        }
-        $mockTableInfo.PSObject.TypeNames.Insert(0, 'TableInfo')
+        $mockTableInfo = New-Object TableInfo
+        $mockTableInfo.SchemaName = 'dbo'
+        $mockTableInfo.TableName = 'Orders'
+        $mockTableInfo.PrimaryKey = New-Object 'System.Collections.Generic.List[ColumnInfo]'
 
         $result = Test-ShouldSkipTable `
             -Schema 'dbo' `
@@ -426,14 +409,13 @@ Describe 'Test-ShouldSkipTable' {
     }
 
     It 'Returns false when table is valid and not ignored' {
-        Mock -CommandName ([TableInfo2]::IsIgnored) -MockWith { $false }
-
-        $mockTableInfo = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'Orders'
-            PrimaryKey = @('OrderID')
-        }
-        $mockTableInfo.PSObject.TypeNames.Insert(0, 'TableInfo')
+        $mockTableInfo = New-Object TableInfo
+        $mockTableInfo.SchemaName = 'dbo'
+        $mockTableInfo.TableName = 'Orders'
+        $mockTableInfo.PrimaryKey = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+        $column = New-Object ColumnInfo
+        $column.Name = 'OrderID'
+        $mockTableInfo.PrimaryKey.Add($column)
 
         $result = Test-ShouldSkipTable `
             -Schema 'dbo' `
@@ -446,20 +428,23 @@ Describe 'Test-ShouldSkipTable' {
 
 Describe 'Get-JoinConditions' {
     BeforeAll {
-        $mockColumn1 = [PSCustomObject]@{ Name = 'CustomerID' }
-        $mockColumn2 = [PSCustomObject]@{ Name = 'OrderType' }
+        $mockColumn1 = New-Object ColumnInfo
+        $mockColumn1.Name = 'CustomerID'
+        $mockColumn2 = New-Object ColumnInfo
+        $mockColumn2.Name = 'OrderType'
         
-        $mockFk = [PSCustomObject]@{
-            FkColumns = @($mockColumn1, $mockColumn2)
-        }
-        $mockFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        $mockFk = New-Object TableFk
+        $mockFk.FkColumns = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+        $mockFk.FkColumns.Add($mockColumn1)
+        $mockFk.FkColumns.Add($mockColumn2)
     }
 
     It 'Generates correct JOIN conditions for single column FK' {
-        $singleColumnFk = [PSCustomObject]@{
-            FkColumns = @([PSCustomObject]@{ Name = 'CustomerID' })
-        }
-        $singleColumnFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        $singleColumnFk = New-Object TableFk
+        $singleColumnFk.FkColumns = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+        $column = New-Object ColumnInfo
+        $column.Name = 'CustomerID'
+        $singleColumnFk.FkColumns.Add($column)
 
         $result = Get-JoinConditions `
             -Fk $singleColumnFk `
@@ -481,10 +466,11 @@ Describe 'Get-JoinConditions' {
     }
 
     It 'Uses custom aliases correctly' {
-        $singleColumnFk = [PSCustomObject]@{
-            FkColumns = @([PSCustomObject]@{ Name = 'CustomerID' })
-        }
-        $singleColumnFk.PSObject.TypeNames.Insert(0, 'TableFk')
+        $singleColumnFk = New-Object TableFk
+        $singleColumnFk.FkColumns = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+        $column = New-Object ColumnInfo
+        $column.Name = 'CustomerID'
+        $singleColumnFk.FkColumns.Add($column)
 
         $result = Get-JoinConditions `
             -Fk $singleColumnFk `
@@ -510,8 +496,7 @@ Describe 'Get-AdditionalWhereConditions' {
             -FkId 5 `
             -FullSearch $false
 
-        $result | Should -HaveCount 1
-        $result[0] | Should -Match "src\.Fk <> 5"
+        $result | Should -Match "src\.Fk <> 5"
     }
 
     It 'Includes MaxDepth constraint when provided' {
@@ -520,8 +505,7 @@ Describe 'Get-AdditionalWhereConditions' {
             -FkId 1 `
             -FullSearch $true
 
-        $result | Should -HaveCount 1
-        $result[0] | Should -Be "src.Depth < 3"
+        $result | Should -Be "src.Depth < 3"
     }
 
     It 'Includes both MaxDepth and cycle prevention' {

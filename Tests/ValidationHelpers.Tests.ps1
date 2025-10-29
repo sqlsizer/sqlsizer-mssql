@@ -8,8 +8,6 @@
 #>
 
 BeforeAll {
-    $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1" -Force
 }
 
 Describe 'Assert-NotNull Tests' {
@@ -240,7 +238,7 @@ Describe 'Get-ValidatedTableInfo Tests' {
         $table1.SchemaName = "dbo"
         $table1.TableName = "Orders"
         $table1.PrimaryKey = New-Object "System.Collections.Generic.List[ColumnInfo]"
-        $table1.PrimaryKey.Add([PSCustomObject]@{ Name = "OrderID" })
+        $table1.PrimaryKey.Add([ColumnInfo]@{ Name = "OrderID" })
         
         $table2 = New-Object TableInfo
         $table2.SchemaName = "dbo"
@@ -449,7 +447,7 @@ Describe 'Test-TableHasPrimaryKey Tests' {
     It 'Returns true when table has primary key' {
         $table = New-Object TableInfo
         $table.PrimaryKey = New-Object "System.Collections.Generic.List[ColumnInfo]"
-        $table.PrimaryKey.Add([PSCustomObject]@{ Name = "ID" })
+        $table.PrimaryKey.Add([ColumnInfo]@{ Name = "ID" })
         
         $result = Test-TableHasPrimaryKey $table
         $result | Should -Be $true

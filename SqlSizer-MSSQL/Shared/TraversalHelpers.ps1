@@ -100,15 +100,16 @@ function Get-NewTraversalState
     {
         if ($CurrentState -eq [TraversalState]::Include)
         {
-            $newState = if ($FullSearch) { 
-                [TraversalState]::Include 
+            if ($FullSearch) { 
+                $newState = [TraversalState]::Include 
             } else { 
-                [TraversalState]::Pending 
+                $newState = [TraversalState]::Pending 
             }
         }
         # Pending and Exclude do not traverse incoming
     }
 
+    Write-Host "Traversal configuration $TraversalConfiguration override check... "
     # Apply TraversalConfiguration overrides if specified
     if ($null -ne $TraversalConfiguration)
     {
@@ -116,14 +117,13 @@ function Get-NewTraversalState
         $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
         
         $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
-        
+        Write-Host "Retrieved item for $targetSchema . $targetTable : $item"
         if ($null -ne $item -and $null -ne $item.StateOverride)
         {
             # Use the forced state from StateOverride
             $newState = $item.StateOverride.State
         }
     }
-
     return $newState
 }
 

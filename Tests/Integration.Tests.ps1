@@ -12,10 +12,6 @@
 #>
 
 BeforeAll {
-    # Import the module
-    $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1" -Force
-    
     # Test configuration
     $script:testConnectionInfo = [SqlConnectionInfo]@{
         Server     = 'localhost'
