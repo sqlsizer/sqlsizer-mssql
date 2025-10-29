@@ -2,13 +2,49 @@
 
 This directory contains documentation for SqlSizer-MSSQL, focusing on the modern refactored algorithms.
 
+## 🆕 What's New
+
+**[Recent Changes - October 2025](RECENT-CHANGES.md)** - Comprehensive summary of recent improvements, including:
+- Refactored algorithms (production-ready)
+- 150+ unit tests with modular architecture
+- Enhanced documentation (12+ new guides)
+- Bug fixes and performance improvements
+
 ## Archive
 
 Legacy documentation for the original algorithms has been moved to the `Archive/` directory. New projects should use the refactored algorithms documented here.
 
 **See:** [`Archive/README.md`](Archive/README.md) for information on legacy algorithm documentation.
 
-## Directory Structure
+## Getting Started
+- **[Quick Start Guide](Quick-Start-Refactored-Algorithm.md)** - Get started with the refactored algorithm
+- **[Migration Checklist](MIGRATION-CHECKLIST.md)** - Step-by-step migration guide from legacy to refactored
+- **[Recent Changes](RECENT-CHANGES.md)** - October 2025 updates and improvements
+
+## Algorithm Documentation
+- **[Algorithm Comparison](Algorithm-Flow-Comparison.md)** - Visual flow diagrams comparing algorithms
+- **[Find-Subset Refactoring Guide](Find-Subset-Refactoring-Guide.md)** - Technical deep dive
+- **[Find-RemovalSubset Refactoring Guide](Find-RemovalSubset-Refactoring-Guide.md)** - Removal algorithm improvements
+- **[Architecture Diagram](Architecture-Diagram.md)** - System architecture overview
+
+## Configuration & API
+- **[ColorMap Compatibility](ColorMap-Compatibility-Guide.md)** - Backwards compatibility with legacy code
+- **[ColorMap Modernization](ColorMap-Modernization-Guide.md)** - New TraversalConfiguration API
+- **[Dynamic Keys Test Plan](QueryBuilders-Dynamic-Keys-TestPlan.md)** - N-column primary key support
+
+## Development & Testing
+- **[Developer Reference](Developer-Quick-Reference.md)** - Validation helpers, config builders
+- **[Testing Guide](Testing-Quick-Reference.md)** - Test architecture and running tests
+- **[Testing Summary](Testing-Refactoring-Summary.md)** - Test structure and coverage
+- **[Code Improvements](Code-Improvements-Summary.md)** - Code quality enhancements
+
+## Project Documentation
+- **[Refactoring Complete](REFACTORING-COMPLETE.md)** - Summary of refactoring work
+- **[Refactoring Summary](REFACTORING-SUMMARY.md)** - Executive summary of changes
+- **[Modernization Summary](MODERNIZATION-SUMMARY.md)** - Modern API adoption guide
+- **[Reorganization Summary](REORGANIZATION-SUMMARY.md)** - File structure changes
+- **[Filename Improvements](FILENAME-IMPROVEMENTS.md)** - Naming convention updates
+- **[Verification Checklist](VERIFICATION-CHECKLIST.md)** - Quality assurance checklist
 
 ### AdventureWorks2019
 

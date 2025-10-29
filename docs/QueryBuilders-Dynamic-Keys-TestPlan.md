@@ -86,8 +86,9 @@ The best way to test this is through integration tests that:
 ## Test Files Updated
 
 - `Tests/QueryBuilders.Tests.ps1` - Added 6 new test cases in "Dynamic Key Column Generation" context
-- Tests currently fail due to PowerShell type binding issues with `[TableInfo]` and `[TableFk]` types
-- Tests are structurally correct and will pass once type system is properly initialized
+- ✅ **Tests now passing** - Type system issues resolved
+- Tests verify dynamic generation for 1-8 column primary keys
+- Integration tested through main algorithm execution
 
 ## Verification Checklist
 
