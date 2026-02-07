@@ -38,4 +38,4 @@ $subsetTables = Get-SubsetTables -Database $database -ConnectionInfo $connection
 
 # Display results
 Write-Host "Subset contains data from the following tables:" -ForegroundColor Green
-$subsetTables | Format-Table SchemaName, TableName, Rows -AutoSize
+$subsetTables | Format-Table SchemaName, TableName, RowCount -AutoSize
