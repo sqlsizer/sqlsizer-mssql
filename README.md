@@ -336,6 +336,7 @@ The original `Find-Subset` and `Find-RemovalSubset` functions are still availabl
 # Documentation
 
 ## Getting Started
+- **[How It Works](docs/HOW-IT-WORKS.md)** - Comprehensive technical guide to SqlSizer internals
 - **[Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)** - Get started with the refactored algorithm
 - **[Algorithm Comparison](docs/Algorithm-Flow-Comparison.md)** - Visual flow diagrams
 - **[Refactoring Summary](docs/REFACTORING-SUMMARY.md)** - What changed and why
