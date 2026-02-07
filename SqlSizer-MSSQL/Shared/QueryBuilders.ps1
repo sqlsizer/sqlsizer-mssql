@@ -73,19 +73,44 @@ function New-CTETraversalQuery
     if ($Direction -eq [TraversalDirection]::Outgoing)
     {
         $sourceColumns = $SourceTable.PrimaryKey
-        $targetColumns = $Fk.FkColumns
+        $targetColumns = $Fk.Columns  # Referenced columns (target's PK)
+        
+        # For OUTGOING: join through source table
+        # SourceRecords (src) -> SourceTable (srcTable) on PK -> TargetTable (tgt) on FK->PK
+        $srcTableJoinConditions = for ($i = 0; $i -lt $SourceTable.PrimaryKey.Count; $i++) {
+            $col = $SourceTable.PrimaryKey[$i]
+            "src.Key$i = srcTable.$($col.Name)"
+        }
+        $srcTableJoinClause = $srcTableJoinConditions -join " AND "
+        
+        $targetJoinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
+            "srcTable.$($Fk.FkColumns[$i].Name) = tgt.$($Fk.Columns[$i].Name)"
+        }
+        $targetJoinClause = $targetJoinConditions -join " AND "
+        
+        $fromClause = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
+    INNER JOIN SourceRecords src ON $srcTableJoinClause
+"@
     }
     else # Incoming
     {
-        $sourceColumns = $Fk.FkColumns
+        $sourceColumns = $Fk.Columns  # Referenced columns (source's PK that FK points to)
         $targetColumns = $TargetTable.PrimaryKey
+        
+        # For INCOMING: direct join from SourceRecords to TargetTable
+        # SourceRecords has PK of FK target, join to TargetTable (FK source) on FK columns
+        $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
+            "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
+        }
+        $joinClause = $joinConditions -join " AND "
+        
+        $fromClause = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN SourceRecords src ON $joinClause
+"@
     }
-
-    # Build JOIN conditions
-    $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
-        "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
-    }
-    $joinClause = $joinConditions -join " AND "
 
     # Build select list for target keys
     $targetKeySelect = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
@@ -96,7 +121,8 @@ function New-CTETraversalQuery
 
     # Build NOT EXISTS check
     $notExistsConditions = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
-        "existing.Key$i = tgt.Key$i"
+        $col = $targetColumns[$i]
+        "existing.Key$i = " + (Get-ColumnValue -ColumnName $col.Name -Prefix "tgt." -DataType $col.DataType)
     }
     $notExistsClause = $notExistsConditions -join " AND "
 
@@ -126,6 +152,8 @@ function New-CTETraversalQuery
     
     $query = @"
 -- Traverse $directionLabel FK: $($Fk.Name)
+DECLARE @InsertedRows TABLE (Depth INT);
+
 WITH SourceRecords AS (
     SELECT $sourceKeyList, Depth, Fk
     FROM $SourceProcessing src
@@ -139,9 +167,8 @@ NewRecords AS (
     SELECT DISTINCT $topClause
         $targetKeyList,
         src.Depth + 1 AS Depth
-    FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN SourceRecords src ON $joinClause
-    WHERE $($targetColumns[0].Name) IS NOT NULL
+    $fromClause
+    WHERE tgt.$($targetColumns[0].Name) IS NOT NULL
         $whereClause
         AND NOT EXISTS (
             SELECT 1 
@@ -151,13 +178,14 @@ NewRecords AS (
         )
 )
 INSERT INTO $TargetProcessing ($targetKeyListForInsert, Color, Source, Depth, Fk, Iteration)
-SELECT *, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
+OUTPUT inserted.Depth INTO @InsertedRows
+SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
 
 -- Update operations table
 INSERT INTO SqlSizer.Operations (
     [Table], Color, ToProcess, Processed, Status, Source, Fk, Depth, 
-    FoundDate, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
+    Created, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
 )
 SELECT 
     $TargetTableId, 
@@ -173,7 +201,7 @@ SELECT
     '$SessionId', 
     $Iteration, 
     NULL
-FROM NewRecords
+FROM @InsertedRows
 GROUP BY Depth;
 
 "@
