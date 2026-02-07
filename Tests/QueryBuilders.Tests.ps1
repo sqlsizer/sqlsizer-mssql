@@ -399,6 +399,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
         $mockFk = [PSCustomObject]@{
             Name      = 'FK_Orders_Customers'
             FkColumns = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })
+            Columns   = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })  # Referenced PK columns
         }
 
         # Create mock tables with multiple columns for dynamic key testing
@@ -427,6 +428,10 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 [PSCustomObject]@{ Name = 'FkKey1'; DataType = 'int' },
                 [PSCustomObject]@{ Name = 'FkKey2'; DataType = 'varchar' }
             )
+            Columns   = @(
+                [PSCustomObject]@{ Name = 'Key1'; DataType = 'int' },
+                [PSCustomObject]@{ Name = 'Key2'; DataType = 'varchar' }
+            )  # Referenced PK columns from CompositeKeyTable
         }
 
         # Mock Get-ColumnValue function
