@@ -92,8 +92,6 @@ See the [Examples/](Examples/) directory for complete working scripts:
 | Guide | Description |
 |-------|-------------|
 | **[How It Works](docs/HOW-IT-WORKS.md)** | Algorithm, traversal states, data structures, troubleshooting |
-| [Developer Reference](docs/Developer-Quick-Reference.md) | API reference, helper functions |
-| [Testing Guide](docs/Testing-Refactoring-Summary.md) | Running tests, code coverage |
 
 ## License
 
