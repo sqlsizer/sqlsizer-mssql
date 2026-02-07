@@ -8,11 +8,13 @@
 #>
 
 BeforeAll {
+    $modulePath = Split-Path -Parent $PSScriptRoot
+    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
 }
+
 
 Describe 'Get-NewTraversalState' {
     BeforeAll {
-       
         # Create TableFk object
         $mockFk = New-Object TableFk
         $mockFk.Schema = 'dbo'

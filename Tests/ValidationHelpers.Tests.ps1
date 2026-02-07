@@ -8,6 +8,8 @@
 #>
 
 BeforeAll {
+    $modulePath = Split-Path -Parent $PSScriptRoot
+    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
 }
 
 Describe 'Assert-NotNull Tests' {
