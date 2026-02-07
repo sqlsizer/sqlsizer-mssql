@@ -117,7 +117,7 @@ function Get-NewTraversalState
         $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
         
         $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
-        Write-Verbose "Retrieved rule for $targetSchema.$targetTable: $($null -ne $item)"
+        Write-Verbose "Retrieved rule for $targetSchema . $targetTable : $($null -ne $item)"
         if ($null -ne $item -and $null -ne $item.StateOverride)
         {
             # Use the forced state from StateOverride
