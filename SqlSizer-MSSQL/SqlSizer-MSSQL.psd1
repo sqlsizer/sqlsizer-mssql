@@ -12,7 +12,7 @@
 RootModule = ".\SqlSizer-MSSQL.psm1"
 
 # Version number of this module.
-ModuleVersion = '2.0.0'
+ModuleVersion = '2.0.1'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -27,7 +27,7 @@ Author = 'Marcin Gołębiowski'
 CompanyName = 'SqlSizer'
 
 # Copyright statement for this module
-Copyright = 'Copyright (c) 2022-2025 Marcin Gołębiowski (licensed under MIT)'
+Copyright = 'Copyright (c) 2022-2026 Marcin Gołębiowski (licensed under MIT)'
 
 # Description of the functionality provided by this module
 Description = 'A PowerShell module for managing data in Microsoft SQL Server, Azure SQL databases.'

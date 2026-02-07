@@ -3,13 +3,14 @@
 
 A PowerShell module for managing data in Microsoft SQL Server, Azure SQL databases and Azure Synapse Analytics SQL Pool.
 
-## 🆕 Version 2.0.0 (February 2026)
+## 🆕 Version 2.0.1 (February 2026)
 
 Major release consolidating the algorithm implementations:
 - ✅ **`Find-Subset`** - 45% lower complexity, 50% less memory usage
 - ✅ **150+ unit tests** - Fast, database-free testing
 - ✅ **Modular architecture** - 16 testable helper functions
 - ✅ **Comprehensive docs** - 12+ guides and examples
+- 🐛 **Bug fixes** - Fixed data label swaps, undefined variables, type mismatches
 
 **[See What's New →](docs/RECENT-CHANGES.md)** | **[Changelog →](CHANGELOG.md)**
 

@@ -5,6 +5,14 @@ All notable changes to SqlSizer-MSSQL will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-02-07
+
+### Fixed
+- `Get-SubsetTableRows`: Fixed swapped SchemaName/TableName labels in SQL output
+- `Copy-SubsetToDatabaseFileSet`: Fixed undefined variable `$connection` (now uses `$ConnectionInfo`)
+- `Initialize-OperationsTable`: Fixed null check occurring after property access (potential runtime error)
+- `Invoke-SqlcmdEx`: Fixed `$Silent` parameter type mismatch (was `[string]`, now `[bool]`)
+
 ## [2.0.0] - 2026-02-07
 
 ### Breaking Changes
