@@ -413,21 +413,33 @@ class TraversalStateMap
     #>
     [TraversalStateItem[]]$Items
     
+    # Internal hashtable cache for O(1) lookups
+    hidden [hashtable]$_itemCache = $null
+    
     TraversalStateMap()
     {
         $this.Items = @()
     }
     
-    [TraversalStateItem] GetItemForTable([string]$schema, [string]$table)
+    # Builds internal hashtable cache on first access
+    hidden [void] EnsureCache()
     {
-        foreach ($item in $this.Items)
+        if ($null -eq $this._itemCache)
         {
-            if ($item.SchemaName -eq $schema -and $item.TableName -eq $table)
+            $this._itemCache = @{}
+            foreach ($item in $this.Items)
             {
-                return $item
+                $key = "$($item.SchemaName), $($item.TableName)"
+                $this._itemCache[$key] = $item
             }
         }
-        return $null
+    }
+    
+    [TraversalStateItem] GetItemForTable([string]$schema, [string]$table)
+    {
+        $this.EnsureCache()
+        $key = "$schema, $table"
+        return $this._itemCache[$key]
     }
 }
 
@@ -546,21 +558,33 @@ class TraversalConfiguration
     #>
     [TraversalRule[]]$Rules
     
+    # Internal hashtable cache for O(1) lookups
+    hidden [hashtable]$_ruleCache = $null
+    
     TraversalConfiguration()
     {
         $this.Rules = @()
     }
     
-    [TraversalRule] GetItemForTable([string]$schema, [string]$table)
+    # Builds internal hashtable cache on first access
+    hidden [void] EnsureCache()
     {
-        foreach ($rule in $this.Rules)
+        if ($null -eq $this._ruleCache)
         {
-            if ($rule.SchemaName -eq $schema -and $rule.TableName -eq $table)
+            $this._ruleCache = @{}
+            foreach ($rule in $this.Rules)
             {
-                return $rule
+                $key = "$($rule.SchemaName), $($rule.TableName)"
+                $this._ruleCache[$key] = $rule
             }
         }
-        return $null
+    }
+    
+    [TraversalRule] GetItemForTable([string]$schema, [string]$table)
+    {
+        $this.EnsureCache()
+        $key = "$schema, $table"
+        return $this._ruleCache[$key]
     }
 }
 

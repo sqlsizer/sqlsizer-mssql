@@ -91,6 +91,12 @@ function Find-RemovalSubset
     $tablesByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
     $fksByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
     $ignoredTables = @()
+    
+    # O(1) table lookup hashtable for DatabaseInfo.Tables (optimization)
+    $tablesByFullName = @{}
+    foreach ($t in $DatabaseInfo.Tables) {
+        $tablesByFullName["$($t.SchemaName), $($t.TableName)"] = $t
+    }
 
     #region Helper Functions
 
@@ -111,9 +117,8 @@ function Find-RemovalSubset
         )
 
         $tableId = $tablesByName[$Table.SchemaName + ", " + $Table.TableName].Id
-        $fkTable = $DatabaseInfo.Tables | Where-Object { 
-            ($_.SchemaName -eq $Fk.FkSchema) -and ($_.TableName -eq $Fk.FkTable) 
-        }
+        # O(1) lookup using hashtable instead of Where-Object
+        $fkTable = $tablesByFullName["$($Fk.FkSchema), $($Fk.FkTable)"]
         $fkTableId = $tablesByName[$Fk.FkSchema + ", " + $Fk.FkTable].Id
         $fkId = $fksByName[$Fk.FkSchema + ", " + $Fk.FkTable + ", " + $Fk.Name].Id
         $fkSignature = $structure.Tables[$fkTable]

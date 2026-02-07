@@ -64,6 +64,13 @@ function Find-Subset
 
     # Query caches - keyed by "schema_table_state_direction"
     $queryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string]]"
+    
+    # O(1) table lookup hashtable - built at initialization
+    $script:tablesByFullName = @{}
+    foreach ($t in $DatabaseInfo.Tables) {
+        $script:tablesByFullName["$($t.SchemaName), $($t.TableName)"] = $t
+    }
+    
     #region Helper Functions
 
     function New-TraversalQuery
@@ -84,7 +91,8 @@ function Find-Subset
             [int]$Iteration
         )
 
-        $result = ""
+        # Use List<string> instead of += for efficient string building
+        $queryList = [System.Collections.Generic.List[string]]::new()
         $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
         $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
 
@@ -120,9 +128,8 @@ function Find-Subset
                 $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration -FullSearch $FullSearch
                 $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
 
-                $targetTableInfo = $DatabaseInfo.Tables | Where-Object { 
-                    ($_.SchemaName -eq $targetSchema) -and ($_.TableName -eq $targetTable) 
-                }
+                # O(1) lookup using hashtable instead of Where-Object
+                $targetTableInfo = $script:tablesByFullName["$targetSchema, $targetTable"]
                 
                 if ($null -eq $targetTableInfo -or $targetTableInfo.PrimaryKey.Count -eq 0)
                 {
@@ -153,11 +160,11 @@ function Find-Subset
                     -FullSearch $FullSearch `
                     -IsSynapse $ConnectionInfo.IsSynapse
 
-                $result += $query
+                $queryList.Add($query)
             }
         }
 
-        return $result
+        return ($queryList -join "`n")
     }
 
     function Invoke-TraversalOperation
@@ -165,6 +172,9 @@ function Find-Subset
         <#
         .SYNOPSIS
             Executes a single traversal operation (processes one table + state + depth).
+        .DESCRIPTION
+            Batches outgoing and incoming FK queries into a single SQL execution
+            to reduce database round-trips.
         #>
         param
         (
@@ -172,10 +182,8 @@ function Find-Subset
             [int]$Iteration
         )
 
-        $table = $DatabaseInfo.Tables | Where-Object { 
-            ($_.SchemaName -eq $Operation.TableSchema) -and 
-            ($_.TableName -eq $Operation.TableName) 
-        }
+        # O(1) lookup using hashtable instead of Where-Object
+        $table = $script:tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
 
         Write-Progress -Activity "Finding subset $SessionId" `
                        -CurrentOperation "$($table.SchemaName).$($table.TableName) - State: $($Operation.State)" `
@@ -185,7 +193,10 @@ function Find-Subset
         $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing)
         $traverseIncoming = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming)
 
-        # Execute outgoing traversal
+        # Collect queries for batched execution
+        $batchedQueries = [System.Collections.Generic.List[string]]::new()
+
+        # Build outgoing traversal query
         if ($traverseOutgoing)
         {
             $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_OUT"
@@ -208,11 +219,11 @@ function Find-Subset
 
             if ($query -ne "")
             {
-                $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+                $batchedQueries.Add($query)
             }
         }
 
-        # Execute incoming traversal
+        # Build incoming traversal query
         if ($traverseIncoming)
         {
             $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_IN"
@@ -235,8 +246,15 @@ function Find-Subset
 
             if ($query -ne "")
             {
-                $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+                $batchedQueries.Add($query)
             }
+        }
+
+        # Execute all queries in a single batch (reduces round-trips)
+        if ($batchedQueries.Count -gt 0)
+        {
+            $batchedSql = $batchedQueries -join "`n"
+            $null = Invoke-SqlcmdEx -Sql $batchedSql -Database $Database -ConnectionInfo $ConnectionInfo
         }
 
         # NO SPLIT OPERATION - Pending states are resolved later
@@ -271,13 +289,13 @@ function Find-Subset
         $maxIterations = 100  # Safety limit to prevent infinite loops
         $iteration = 0
         
+        # Pre-filter tables with PK outside the loop (optimization #2)
+        $tables = $DatabaseInfo.Tables | Where-Object { $_.PrimaryKey.Count -gt 0 }
+        
         do
         {
             $iteration++
             $changedThisIteration = 0
-            
-            # For each table with Pending records, resolve them
-            $tables = $DatabaseInfo.Tables | Where-Object { $_.PrimaryKey.Count -gt 0 }
         
             foreach ($table in $tables)
             {

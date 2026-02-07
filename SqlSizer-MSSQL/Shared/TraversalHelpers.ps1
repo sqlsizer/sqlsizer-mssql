@@ -109,7 +109,7 @@ function Get-NewTraversalState
         # Pending and Exclude do not traverse incoming
     }
 
-    Write-Host "Traversal configuration $TraversalConfiguration override check... "
+    Write-Verbose "Traversal configuration override check for FK: $($Fk.Name)"
     # Apply TraversalConfiguration overrides if specified
     if ($null -ne $TraversalConfiguration)
     {
@@ -117,7 +117,7 @@ function Get-NewTraversalState
         $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $Fk.Table } else { $Fk.FkTable }
         
         $item = $TraversalConfiguration.GetItemForTable($targetSchema, $targetTable)
-        Write-Host "Retrieved item for $targetSchema . $targetTable : $item"
+        Write-Verbose "Retrieved rule for $targetSchema.$targetTable: $($null -ne $item)"
         if ($null -ne $item -and $null -ne $item.StateOverride)
         {
             # Use the forced state from StateOverride
