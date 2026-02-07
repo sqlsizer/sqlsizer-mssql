@@ -52,7 +52,7 @@ function Get-SubsetTableRows
                     }
                 }
 
-                $sql = "SELECT DISTINCT '$($table.TableName)' as SchemaName,'$($table.SchemaName)' as TableName, $($keys) FROM $($processing) WHERE ([Iteration] = $Iteration OR $Iteration = -1)"
+                $sql = "SELECT DISTINCT '$($table.SchemaName)' as SchemaName,'$($table.TableName)' as TableName, $($keys) FROM $($processing) WHERE ([Iteration] = $Iteration OR $Iteration = -1)"
                 $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
                 return $rows
             }

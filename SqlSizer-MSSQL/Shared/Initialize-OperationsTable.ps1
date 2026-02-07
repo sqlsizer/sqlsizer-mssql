@@ -42,13 +42,14 @@ function Initialize-OperationsTable
         }
         $signature = $structure.Tables[$table]
         $processing = $structure.GetProcessingName($signature, $SessionId)
-        $table = $allTablesGroupedByName[$table.SchemaName + ", " + $table.TableName]
-        $tableId = $table.Id
+        $sqlSizerTable = $allTablesGroupedByName[$table.SchemaName + ", " + $table.TableName]
 
-        if ($null -eq $table)
+        if ($null -eq $sqlSizerTable)
         {
             continue
         }
+
+        $tableId = $sqlSizerTable.Id
 
         $sql = "INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [Color], [Depth], [Created], [SessionId], [FoundIteration])
         SELECT $tableId, COUNT(*), 0, NULL, p.[Color], 0, GETDATE(), '$SessionId', $StartIteration

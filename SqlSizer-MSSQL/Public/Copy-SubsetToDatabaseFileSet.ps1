@@ -32,7 +32,7 @@ function Copy-SubsetToDatabaseFileSet
                                     -Secure $Secure -DatabaseInfo $DatabaseInfo
 
         [System.IO.File]::WriteAllText($tmpFile.FullName, $csv, [Text.Encoding]::GetEncoding("utf-8"))
-        $fileId = Copy-FileToDatabase -FilePath $tmpFile.FullName -Database $TargetDatabase -ConnectionInfo $connection
+        $fileId = Copy-FileToDatabase -FilePath $tmpFile.FullName -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
 
         $result += New-Object TableFile -Property @{ FileId = $fileId; TableContent = $table }
 

@@ -12,7 +12,7 @@ function Invoke-SqlcmdEx
         [string]$Database,
 
         [Parameter(Mandatory = $false)]
-        [string]$Silent = $false,
+        [bool]$Silent = $false,
 
         [Parameter(Mandatory = $true)]
         [SqlConnectionInfo]$ConnectionInfo,
