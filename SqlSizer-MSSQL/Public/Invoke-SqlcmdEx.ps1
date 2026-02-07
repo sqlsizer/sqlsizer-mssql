@@ -24,13 +24,18 @@ function Invoke-SqlcmdEx
     try
     {
         Write-Verbose "Invoke SQL [$(Get-Date)] => $($Sql.Substring(0, [Math]::Min(80, $Sql.Length))) ..."
+        
+        # Determine encryption setting for SQLServer module v22+
+        $encryptValue = if ($ConnectionInfo.EncryptConnection) { 'Mandatory' } else { 'Optional' }
+        
         $params = @{
             Query             = $Sql
             ServerInstance    = $ConnectionInfo.Server
             Database          = $Database
             QueryTimeout      = 65535
             Verbose           = $true
-            EncryptConnection = $ConnectionInfo.EncryptConnection
+            Encrypt           = $encryptValue
+            TrustServerCertificate = (-not $ConnectionInfo.EncryptConnection)
         }
 
         if (($null -ne $ConnectionInfo.AccessToken) -and ($ConnectionInfo.AccessToken -ne ""))

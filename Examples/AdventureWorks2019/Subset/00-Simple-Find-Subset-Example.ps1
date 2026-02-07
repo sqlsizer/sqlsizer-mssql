@@ -21,7 +21,7 @@ $query.State = [TraversalState]::Include  # Include these records and their depe
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
-$query.Where = "[`$table].FirstName = 'John'"
+$query.Where = "[`$table].FirstName = 'Ken'"
 $query.Top = 5
 
 # 5. Initialize the starting set with your query

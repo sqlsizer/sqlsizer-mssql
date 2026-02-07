@@ -225,12 +225,12 @@ function Initialize-StartSet
         try
         {
             Write-Verbose "  Executing: $sql"
-            $rowsInserted = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
             
-            if ($null -eq $rowsInserted)
-            {
-                $rowsInserted = 0
-            }
+            # Use OUTPUT clause to count inserted rows
+            $countSql = $sql + "; SELECT @@ROWCOUNT AS RowsInserted"
+            $result_query = Invoke-SqlcmdEx -Sql $countSql -Database $Database -ConnectionInfo $ConnectionInfo
+            
+            $rowsInserted = if ($null -ne $result_query) { $result_query.RowsInserted } else { 0 }
             
             if ($rowsInserted -eq 0)
             {
