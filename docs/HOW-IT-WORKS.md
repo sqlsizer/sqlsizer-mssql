@@ -156,7 +156,7 @@ Every record discovered during subset search is assigned a **TraversalState** th
 |-------|------|-----------|--------------|---------------|
 | **Include** | `[TraversalState]::Include` | Must be in subset | Outgoing + Incoming (if FullSearch) | ✅ In subset |
 | **Exclude** | `[TraversalState]::Exclude` | Must NOT be in subset | None - stops here | ❌ Not in subset |
-| **Pending** | `[TraversalState]::Pending` | Discovered but uncertain | Outgoing only | Resolved later |
+| **Pending** | `[TraversalState]::Pending` | Discovered via incoming FKs (non-full search) | Outgoing only | Promoted to Include during traversal if reachable via Include path, otherwise Exclude |
 | **InboundOnly** | `[TraversalState]::InboundOnly` | For removal operations | Incoming only | Finds dependents |
 
 ### Traversal Directions
@@ -448,32 +448,41 @@ WHILE unprocessed records exist:
 
 ### Phase 3: State Resolution
 
-After traversal, **Pending** records need final classification:
+After traversal, any remaining **Pending** records are marked as **Exclude**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     PENDING STATE RESOLUTION                            │
+│                     PENDING STATE HANDLING                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│   BEFORE RESOLUTION:                                                    │
-│   ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐         │
-│   │ Include │ ──► │ Pending │ ──► │ Pending │ ──► │ Pending │         │
-│   └─────────┘     └─────────┘     └─────────┘     └─────────┘         │
+│   DURING TRAVERSAL (handled automatically):                            │
+│   ┌─────────┐                                                          │
+│   │ Include │                                                          │
+│   └────┬────┘                                                          │
+│        │ incoming FK (non-full search)                                 │
+│        ▼                                                               │
+│   ┌─────────┐     outgoing FK      ┌─────────┐                        │
+│   │ Pending │ ─────────────────►   │ Pending │                        │
+│   └─────────┘                      └─────────┘                        │
+│        │                                │                              │
+│        │ If later found via Include path, promoted to Include         │
+│        ▼                                                               │
+│   ┌─────────┐                                                          │
+│   │ Include │ (promoted during traversal)                              │
+│   └─────────┘                                                          │
 │                                                                         │
-│   RESOLUTION PROCESS:                                                   │
-│   1. Find all Pending records reachable from Include                   │
-│   2. Iteratively propagate Include status                              │
-│   3. Mark remaining Pending as Exclude                                 │
+│   AFTER TRAVERSAL (final cleanup):                                     │
+│   - Any remaining Pending records → marked as Exclude                  │
+│   - These are orphaned dependents not reachable via Include paths     │
 │                                                                         │
-│   AFTER RESOLUTION:                                                     │
-│   ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐         │
-│   │ Include │ ──► │ Include │ ──► │ Include │ ──► │ Include │         │
-│   └─────────┘     └─────────┘     └─────────┘     └─────────┘         │
+│   ┌─────────┐                                                          │
+│   │ Exclude │ (was Pending, never connected to Include)                │
+│   └─────────┘                                                          │
 │                                                                         │
-│   Isolated Pending records become Exclude:                             │
-│                   ┌─────────┐                                          │
-│                   │ Exclude │ (was Pending, not connected to Include)  │
-│                   └─────────┘                                          │
+│   KEY INSIGHT:                                                          │
+│   Pending→Include promotion happens DURING traversal, not after.       │
+│   When a record already exists as Pending and is discovered again via  │
+│   an Include path, it is immediately promoted to Include.              │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

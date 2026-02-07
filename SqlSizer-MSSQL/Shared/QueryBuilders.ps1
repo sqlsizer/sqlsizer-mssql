@@ -150,6 +150,12 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     # Build the query
     $directionLabel = if ($Direction -eq [TraversalDirection]::Outgoing) { 'OUTGOING' } else { 'INCOMING' }
     
+    # Build conditions for updating existing Pending records to Include
+    $updateKeyConditions = for ($i = 0; $i -lt $targetColumns.Count; $i++) {
+        "existing.Key$i = nr.Key$i"
+    }
+    $updateKeyClause = $updateKeyConditions -join " AND "
+    
     $query = @"
 -- Traverse $directionLabel FK: $($Fk.Name)
 DECLARE @InsertedRows TABLE (Depth INT);
@@ -173,14 +179,33 @@ NewRecords AS (
         AND NOT EXISTS (
             SELECT 1 
             FROM $TargetProcessing existing 
-            WHERE existing.Color = $([int]$NewState)
-                AND $notExistsClause
+            WHERE $notExistsClause
         )
 )
 INSERT INTO $TargetProcessing ($targetKeyListForInsert, Color, Source, Depth, Fk, Iteration)
 OUTPUT inserted.Depth INTO @InsertedRows
 SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
+
+-- Promote existing Pending records to Include if we found them via Include path
+-- This handles the case where a record was first discovered as Pending, then later as Include
+$(if ($NewState -eq [TraversalState]::Include) {
+@"
+UPDATE existing
+SET Color = $([int][TraversalState]::Include)
+FROM $TargetProcessing existing
+WHERE existing.Color = $([int][TraversalState]::Pending)
+    AND EXISTS (
+        SELECT 1 FROM (
+            SELECT DISTINCT $targetKeyList
+            $fromClause
+            WHERE tgt.$($targetColumns[0].Name) IS NOT NULL
+                $whereClause
+        ) nr
+        WHERE $updateKeyClause
+    );
+"@
+} else { "" })
 
 -- Update operations table
 INSERT INTO SqlSizer.Operations (
@@ -204,67 +229,6 @@ SELECT
 FROM @InsertedRows
 GROUP BY Depth;
 
-"@
-
-    if (-not $IsSynapse)
-    {
-        $query += "`nGO`n"
-    }
-
-    return $query
-}
-
-function New-PendingResolutionQuery
-{
-    <#
-    .SYNOPSIS
-        Builds query to resolve Pending states to Include.
-    .DESCRIPTION
-        Pure function that generates SQL for marking Pending records
-        as Include when they match Include records.
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param
-    (
-        [Parameter(Mandatory = $true)]
-        [string]$ProcessingTable,
-        
-        [Parameter(Mandatory = $true)]
-        [TableInfo]$TableInfo,
-        
-        [Parameter(Mandatory = $true)]
-        [int]$Iteration,
-        
-        [Parameter(Mandatory = $true)]
-        [bool]$IsSynapse
-    )
-
-    $pendingState = [int][TraversalState]::Pending
-    $includeState = [int][TraversalState]::Include
-
-    # Build PK comparison conditions
-    $pkConditions = for ($i = 0; $i -lt $TableInfo.PrimaryKey.Count; $i++) {
-        "pending.Key$i = inc.Key$i"
-    }
-    $pkJoin = $pkConditions -join " AND "
-
-    $query = @"
--- Resolve Pending states for $($TableInfo.SchemaName).$($TableInfo.TableName) (iteration $Iteration)
-DECLARE @Changed INT = 0;
-
-UPDATE pending
-SET Color = $includeState
-FROM $ProcessingTable pending
-WHERE pending.Color = $pendingState
-    AND EXISTS (
-        SELECT 1
-        FROM $ProcessingTable inc
-        WHERE inc.Color = $includeState
-            AND $pkJoin
-    );
-
-SET @Changed = @@ROWCOUNT;
 "@
 
     if (-not $IsSynapse)
@@ -511,7 +475,6 @@ WHERE SessionId = '$SessionId'
 
 Export-ModuleMember -Function @(
     'New-CTETraversalQuery',
-    'New-PendingResolutionQuery',
     'New-ExcludePendingQuery',
     'New-GetNextOperationQuery',
     'New-MarkOperationInProgressQuery',

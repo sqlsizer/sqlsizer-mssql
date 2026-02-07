@@ -265,100 +265,28 @@ function Find-Subset
     {
         <#
         .SYNOPSIS
-            Resolves Pending states after traversal completes.
-            This replaces the confusing "Split" operation.
+            Marks remaining Pending states as Exclude after traversal completes.
         .DESCRIPTION
             Pending records are those reached via incoming FKs in non-full search.
-            Resolution logic: 
-            1. If a Pending record is also reachable as Include, mark it Include
-            2. Iteratively propagate Include to Pending dependencies
-            3. Mark remaining Pending as Exclude
+            During traversal, Pending records that are also reachable via Include paths
+            are automatically promoted to Include (handled in New-CTETraversalQuery).
             
-            Note: Pending -> Pending transitions mean uncertainty propagates through
-            dependency chains. This function resolves those chains transitively.
+            This function marks any remaining Pending records as Exclude - these are
+            records that were discovered as dependents but never confirmed as necessary
+            for the subset (not reachable from any Include path).
         #>
         param
         (
             [int]$Iteration
         )
 
-        Write-Verbose "Resolving Pending states for iteration $Iteration (transitive resolution)"
+        Write-Verbose "Marking remaining Pending states as Exclude for iteration $Iteration"
 
-        # Iteratively resolve Pending states until no more changes
-        $resolvedCount = 0
-        $maxIterations = 100  # Safety limit to prevent infinite loops
-        $iteration = 0
-        
-        # Pre-filter tables with PK outside the loop (optimization #2)
+        # Pre-filter tables with PK outside the loop
         $tables = $DatabaseInfo.Tables | Where-Object { $_.PrimaryKey.Count -gt 0 }
-        
-        do
-        {
-            $iteration++
-            $changedThisIteration = 0
-        
-            foreach ($table in $tables)
-            {
-                $signature = $structure.Tables[$table]
-                $processing = $structure.GetProcessingName($signature, $SessionId)
+        $excludedCount = 0
 
-                $pendingState = [int][TraversalState]::Pending
-                $includeState = [int][TraversalState]::Include
-                $excludeState = [int][TraversalState]::Exclude
-
-                # Build PK comparison conditions
-                $pkConditions = for ($i = 0; $i -lt $table.PrimaryKey.Count; $i++) {
-                    "pending.Key$i = inc.Key$i"
-                }
-                $pkJoin = $pkConditions -join " AND "
-
-                # Mark Pending as Include if it matches an Include record
-                # This handles both direct matches AND transitive dependencies
-                # (since Pending -> Pending means dependencies become Include too)
-                $query = @"
--- Resolve Pending states for $($table.SchemaName).$($table.TableName) (iteration $iteration)
-DECLARE @Changed INT = 0;
-
-UPDATE pending
-SET Color = $includeState
-FROM $processing pending
-WHERE pending.Color = $pendingState
-    AND EXISTS (
-        SELECT 1
-        FROM $processing inc
-        WHERE inc.Color = $includeState
-            AND $pkJoin
-    );
-
-SET @Changed = @@ROWCOUNT;
-SELECT @Changed AS Changed;
-"@
-
-                if (-not $ConnectionInfo.IsSynapse)
-                {
-                    $query += "`nGO`n"
-                }
-
-                $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
-                if ($null -ne $result -and $null -ne $result.Changed)
-                {
-                    $changedThisIteration += $result.Changed
-                }
-            }
-            
-            $resolvedCount += $changedThisIteration
-            Write-Verbose "Resolution iteration $($iteration) - Changed $changedThisIteration records"
-            
-        } while ($changedThisIteration -gt 0 -and $iteration -lt $maxIterations)
-
-        if ($iteration -ge $maxIterations)
-        {
-            Write-Warning "Pending resolution hit maximum iterations ($maxIterations). Possible circular dependency."
-        }
-
-        Write-Verbose "Resolved $resolvedCount Pending records to Include in $iteration iterations"
-
-        # Mark ALL remaining Pending as Exclude (those not reachable from Include)
+        # Mark ALL remaining Pending as Exclude (those not promoted to Include during traversal)
         foreach ($table in $tables)
         {
             $signature = $structure.Tables[$table]
@@ -368,9 +296,12 @@ SELECT @Changed AS Changed;
 
             $query = @"
 -- Mark remaining Pending as Exclude for $($table.SchemaName).$($table.TableName)
+DECLARE @ExcludedCount INT = 0;
 UPDATE $processing
 SET Color = $excludeState
 WHERE Color = $pendingState;
+SET @ExcludedCount = @@ROWCOUNT;
+SELECT @ExcludedCount AS ExcludedCount;
 "@
 
             if (-not $ConnectionInfo.IsSynapse)
@@ -378,8 +309,14 @@ WHERE Color = $pendingState;
                 $query += "`nGO`n"
             }
 
-            $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+            $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+            if ($null -ne $result -and $null -ne $result.ExcludedCount)
+            {
+                $excludedCount += $result.ExcludedCount
+            }
         }
+
+        Write-Verbose "Marked $excludedCount Pending records as Exclude"
     }
 
     function Get-NextOperation

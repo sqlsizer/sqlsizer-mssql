@@ -76,9 +76,8 @@ Invoke-Pester -Configuration $config
   - `New-MarkOperationInProgressQuery` - Operation marking
   - `New-CompleteOperationsQuery` - Operation completion
   - `New-GetIterationStatisticsQuery` - Statistics retrieval
-  - `New-PendingResolutionQuery` - Pending state resolution
-  - `New-ExcludePendingQuery` - Pending exclusion
-  - `New-CTETraversalQuery` - Main traversal CTE query
+  - `New-ExcludePendingQuery` - Pending exclusion (marks orphaned Pending as Exclude)
+  - `New-CTETraversalQuery` - Main traversal CTE query (includes Pending→Include promotion)
 
 ## Writing New Tests
 
