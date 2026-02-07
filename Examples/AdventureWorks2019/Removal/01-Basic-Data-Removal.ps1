@@ -28,10 +28,10 @@ $ignored = New-Object -Type TableInfo2
 $ignored.SchemaName = "Sales"
 $ignored.TableName = "Store"
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Use the refactored removal subset algorithm (cleaner, more efficient)
-$null = Find-RemovalSubset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
+$null = Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
 Get-SubsetHashSummary -Database $database -Connection $connection -SessionId $sessionId

@@ -5,10 +5,29 @@ All notable changes to SqlSizer-MSSQL will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-02-07
+
+### Breaking Changes
+- Removed legacy algorithm files: `Find-Subset.ps1` (old), `Find-RemovalSubset.ps1` (old), `Initialize-StartSet.ps1` (old)
+- The refactored algorithms are now the canonical implementations (renamed from `-Refactored` suffix)
+- Scripts using the legacy `ColorMap` parameter with `Find-Subset` will need to migrate to `TraversalConfiguration`
+
+### Changed
+- `Find-Subset-Refactored` → `Find-Subset` (function renamed, file renamed)
+- `Find-RemovalSubset-Refactored` → `Find-RemovalSubset` (function renamed, file renamed)
+- `Initialize-StartSet-Refactored` → `Initialize-StartSet` (function renamed, file renamed)
+- All examples updated to use new function names
+- Documentation updated to remove legacy/refactored distinction
+
+### Removed
+- Legacy `Find-Subset.ps1` (787 lines)
+- Legacy `Find-RemovalSubset.ps1` (361 lines)
+- Legacy `Initialize-StartSet.ps1` (70 lines)
+
+## [1.0.6] - Previous Release
 
 ### Added
-- New refactored algorithms: `Find-Subset-Refactored` and `Find-RemovalSubset-Refactored`
+- Refactored algorithms: `Find-Subset` and `Find-RemovalSubset`
 - Comprehensive test suite with 150+ unit tests
 - Modular architecture with 16 helper functions in separate modules:
   - `TraversalHelpers.ps1` - State transition and constraint logic
@@ -93,8 +112,8 @@ Key milestones in earlier versions:
 ## Migration Notes
 
 ### To Refactored Algorithms
-1. Replace `Find-Subset` with `Find-Subset-Refactored`
-2. Replace `Find-RemovalSubset` with `Find-RemovalSubset-Refactored`
+1. Replace `Find-Subset` with `Find-Subset`
+2. Replace `Find-RemovalSubset` with `Find-RemovalSubset`
 3. All parameters remain the same (100% backward compatible)
 4. Optionally migrate from `ColorMap` to `TraversalConfiguration` (recommended)
 

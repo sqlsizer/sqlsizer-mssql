@@ -1,4 +1,4 @@
-## Simple example showing basic usage of Find-Subset-Refactored
+## Simple example showing basic usage of Find-Subset
 
 # Connection settings
 $server = "localhost"
@@ -25,11 +25,11 @@ $query.Where = "[`$table].FirstName = 'John'"
 $query.Top = 5
 
 # 5. Initialize the starting set with your query
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection `
+Initialize-StartSet -Database $database -ConnectionInfo $connection `
     -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # 6. Find the complete subset by following foreign key relationships
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection `
+Find-Subset -Database $database -ConnectionInfo $connection `
     -DatabaseInfo $info -SessionId $sessionId
 
 # 7. Get the results - which tables and how many rows in each

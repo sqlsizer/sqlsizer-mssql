@@ -46,10 +46,10 @@ foreach ($table in $info.Tables)
     $config.Rules += $rule
 }
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset using refactored algorithm with modern TraversalConfiguration
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -TraversalConfiguration $config -UseDfs $true -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -TraversalConfiguration $config -UseDfs $true -SessionId $sessionId
 
 # Get subset info
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId

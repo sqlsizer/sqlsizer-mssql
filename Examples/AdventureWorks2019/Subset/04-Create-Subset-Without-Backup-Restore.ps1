@@ -34,10 +34,10 @@ $ignored.SchemaName = "dbo"
 $ignored.TableName = "ErrorLog"
 
 # Init start set
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset using refactored algorithm (forward traversal with ignored tables)
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -SessionId $sessionId
 
 # Create a new db with found subset of data
 $newDatabase = "AdventureWorks2019_subset_w2"

@@ -27,14 +27,14 @@ $query.Top = 10
 $query.OrderBy = "[`$table].LastName ASC"
 
 # Init start set
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 $iteration = 0
 
 do
 {
     # Use refactored algorithm for forward subset finding (Yellow = Pending/Include states)
-    $result = Find-Subset-Refactored -Interactive $true -Iteration $iteration -Database $database -ConnectionInfo $connection `
+    $result = Find-Subset -Interactive $true -Iteration $iteration -Database $database -ConnectionInfo $connection `
             -DatabaseInfo $info -FullSearch $true `
             -UseDfs $false -SessionId $sessionId
 

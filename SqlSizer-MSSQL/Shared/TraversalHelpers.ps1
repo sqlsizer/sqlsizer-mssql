@@ -3,7 +3,7 @@
     Helper functions for graph traversal operations in Find-Subset.
     
 .DESCRIPTION
-    This module contains pure, testable helper functions extracted from Find-Subset-Refactored.
+    This module contains pure, testable helper functions extracted from Find-Subset.
     These functions handle state transitions, constraints, and traversal logic.
 #>
 

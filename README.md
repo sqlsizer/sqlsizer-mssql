@@ -3,16 +3,15 @@
 
 A PowerShell module for managing data in Microsoft SQL Server, Azure SQL databases and Azure Synapse Analytics SQL Pool.
 
-## 🆕 Recent Updates (October 2025)
+## 🆕 Version 2.0.0 (February 2026)
 
-The refactored algorithms are now **production-ready** with comprehensive testing and documentation:
-- ✅ **`Find-Subset-Refactored`** - 45% lower complexity, 50% less memory usage
+Major release consolidating the algorithm implementations:
+- ✅ **`Find-Subset`** - 45% lower complexity, 50% less memory usage
 - ✅ **150+ unit tests** - Fast, database-free testing
 - ✅ **Modular architecture** - 16 testable helper functions
-- ✅ **Enhanced docs** - 12+ new guides including migration path
-- ✅ **100% backward compatible** - Drop-in replacement
+- ✅ **Comprehensive docs** - 12+ guides and examples
 
-**[See What's New →](docs/RECENT-CHANGES.md)** | **[Changelog →](CHANGELOG.md)** | **[Migration Guide →](docs/MIGRATION-CHECKLIST.md)**
+**[See What's New →](docs/RECENT-CHANGES.md)** | **[Changelog →](CHANGELOG.md)**
 
 ## Core Features
 
@@ -60,7 +59,7 @@ SqlSizer uses **graph traversal** (BFS/DFS with multiple sources) to find subset
 **Steps:**
 1. Define queries marking initial records (with Include/Exclude/Pending states)
 2. Optionally configure traversal constraints (max depth, record limits)
-3. Run `Find-Subset-Refactored`
+3. Run `Find-Subset`
 4. Use the resulting subset
 
 **Example:**
@@ -78,7 +77,7 @@ $query.Top = 10
 Initialize-StartSet -Database $database -Queries @($query) -SessionId $sessionId ...
 
 # Find subset
-Find-Subset-Refactored -Database $database -SessionId $sessionId -FullSearch $false ...
+Find-Subset -Database $database -SessionId $sessionId -FullSearch $false ...
 
 # Get results
 Get-SubsetTables -Database $database -SessionId $sessionId ...
@@ -90,7 +89,7 @@ When you need to delete records that are referenced by other records via foreign
 
 **Steps:**
 1. Mark target rows for removal using `Initialize-StartSet`
-2. Run `Find-RemovalSubset-Refactored` to find all dependent rows
+2. Run `Find-RemovalSubset` to find all dependent rows
 3. Use `Remove-Subset` to delete in correct order
 
 **Example:**
@@ -99,7 +98,7 @@ When you need to delete records that are referenced by other records via foreign
 Initialize-StartSet -SessionId $sessionId -Queries $removalQueries ...
 
 # Find all rows that must be removed first (follows incoming FKs)
-Find-RemovalSubset-Refactored -SessionId $sessionId -Database $database -MaxBatchSize 1000 ...
+Find-RemovalSubset -SessionId $sessionId -Database $database -MaxBatchSize 1000 ...
 
 # Remove in correct order
 Remove-Subset -SessionId $sessionId -Database $database ...
@@ -194,10 +193,8 @@ Import-Module SqlSizer-MSSQL
 
 The repository contains comprehensive examples demonstrating various SqlSizer features:
 
-- **`Examples/`** - Original examples using legacy `Find-Subset` and `Find-RemovalSubset` (still functional for backwards compatibility)
-- **`ExamplesNew/`** - Modern examples organized by category (can use either algorithm - just change function name)
-
-**Note:** To use the refactored algorithm in any example, simply replace `Find-Subset` with `Find-Subset-Refactored` and `Find-RemovalSubset` with `Find-RemovalSubset-Refactored`. All parameters remain the same.
+- **`Examples/`** - Examples organized by scenario (AdventureWorks2019, Azure)
+- **`ExamplesNew/`** - Modern examples organized by category
 
 ## Sample 1 (on-premises SQL server)
 ```powershell
@@ -230,7 +227,7 @@ $query.OrderBy = "[`$table].LastName ASC"
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
 
 # Get subset info
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
@@ -301,7 +298,7 @@ $query.Top = 10
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
 
 # Get subset info
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
@@ -318,34 +315,18 @@ https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo02/
 Demo03:
 https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo03/
 
-# Backwards Compatibility
-
-The original `Find-Subset` and `Find-RemovalSubset` functions are still available for backwards compatibility, but new projects should use the refactored versions.
-
-**Migration is simple:** Just change the function name. All parameters and behavior remain the same.
-
-| Original | Refactored | Key Benefits |
-|----------|-----------|--------------|
-| `Find-Subset` | `Find-Subset-Refactored` | 12% less code, 45% lower complexity, no record duplication |
-| `Find-RemovalSubset` | `Find-RemovalSubset-Refactored` | 57% simpler batch logic, CTE-based SQL |
-
-**See Migration Guide:** [Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)
-
-**Legacy Documentation:** For documentation on the original algorithms, see [`docs/Archive/`](docs/Archive/)
 
 # Documentation
 
 ## Getting Started
 - **[How It Works](docs/HOW-IT-WORKS.md)** - Comprehensive technical guide to SqlSizer internals
-- **[Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)** - Get started with the refactored algorithm
-- **[Algorithm Comparison](docs/Algorithm-Flow-Comparison.md)** - Visual flow diagrams
-- **[Refactoring Summary](docs/REFACTORING-SUMMARY.md)** - What changed and why
+- **[Quick Start Guide](docs/Quick-Start-Refactored-Algorithm.md)** - Get started with SqlSizer
+- **[Algorithm Details](docs/Algorithm-Flow-Comparison.md)** - Visual flow diagrams
 
 ## Advanced Topics
-- **[ColorMap Compatibility](docs/ColorMap-Compatibility-Guide.md)** - Backwards compatibility with legacy code
-- **[ColorMap Modernization](docs/ColorMap-Modernization-Guide.md)** - New TraversalConfiguration API
-- **[Removal Guide](docs/Find-RemovalSubset-Refactoring-Guide.md)** - Removal algorithm improvements
-- **[Technical Deep Dive](docs/Find-Subset-Refactoring-Guide.md)** - Detailed algorithm comparison
+- **[TraversalConfiguration API](docs/ColorMap-Modernization-Guide.md)** - Configuration API reference
+- **[Removal Guide](docs/Find-RemovalSubset-Refactoring-Guide.md)** - Removal algorithm details
+- **[Technical Deep Dive](docs/Find-Subset-Refactoring-Guide.md)** - Detailed algorithm internals
 
 ## Development
 - **[Developer Reference](docs/Developer-Quick-Reference.md)** - Validation helpers, config builders

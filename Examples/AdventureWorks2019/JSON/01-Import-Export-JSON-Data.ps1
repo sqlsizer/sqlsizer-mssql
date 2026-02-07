@@ -24,9 +24,9 @@ $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
 $query.Where = "[`$table].FirstName <> 'Michael'"
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 # Use refactored algorithm for forward subset finding
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -IgnoredTables @($ignored) -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -IgnoredTables @($ignored) -SessionId $sessionId
 
 $json = Get-SubsetTableJson -Database $database -ConnectionInfo $connection -SchemaName "Person" -TableName "Password" -DatabaseInfo $info -Secure $false -SessionId $sessionId
 

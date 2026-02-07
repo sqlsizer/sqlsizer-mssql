@@ -24,10 +24,10 @@ $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
 $query.Where = "[`$table].FirstName = 'Rob'"
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset using refactored algorithm
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -SessionId $sessionId
 $subsetGuid = Save-Subset -Database $database -ConnectionInfo $connection -SubsetName "Subset_from_example_17" -DatabaseInfo $info -SessionId $sessionId
 
 Disable-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $info
@@ -42,7 +42,7 @@ Enable-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo
 Enable-AllTablesTriggers -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
 # Use refactored algorithm for forward subset finding
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info  -FullSearch $false -SessionId $sessionId2
+Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info  -FullSearch $false -SessionId $sessionId2
 $subsetGuid2 = Save-Subset -Database $database -ConnectionInfo $connection -SubsetName "Subset_from_example_17_after_little_change" -DatabaseInfo $info -SessionId $sessionId2
 
 $compareResult = Compare-SavedSubsets -SourceDatabase $database -TargetDatabase $database -SourceSubsetGuid $subsetGuid -TargetSubsetGuid $subsetGuid2 -ConnectionInfo $connection

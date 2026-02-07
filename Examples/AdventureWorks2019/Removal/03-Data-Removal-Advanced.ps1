@@ -34,11 +34,11 @@ $query2.KeyColumns = @('ProductID')
 $query2.Where = "[`$table].SafetyStockLevel > 500"
 
 # Init start set with data from query and query2 (multiple sources)
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query, $query2) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query, $query2) -DatabaseInfo $info -SessionId $sessionId
 
 # Find removal subset - Blue = InboundOnly (find rows that must be removed first)
 # Use the refactored algorithm (cleaner, more efficient, CTE-based queries)
-Find-RemovalSubset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
+Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Test foreign keys
 Test-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $info

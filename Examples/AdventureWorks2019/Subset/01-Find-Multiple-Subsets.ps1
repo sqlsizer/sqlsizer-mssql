@@ -26,9 +26,9 @@ $query.KeyColumns = @('BusinessEntityID')
 $query.Where = "[`$table].PersonType = 'EM'"
 $query.Top = 100
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 # Use refactored algorithm for forward subset finding
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 $subset1 = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Query 2: All persons with first name = 'Wanida'
@@ -39,9 +39,9 @@ $query2.Table = "Person"
 $query2.KeyColumns = @('BusinessEntityID')
 $query2.Where = "[`$table].FirstName = 'Wanida'"
 
-Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query2) -DatabaseInfo $info -SessionId $sessionId2
+Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query2) -DatabaseInfo $info -SessionId $sessionId2
 # Use refactored algorithm for forward subset finding
-Find-Subset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
+Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
 $subset2 = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
 
 # end of script

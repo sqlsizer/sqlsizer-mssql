@@ -103,8 +103,8 @@ SqlSizer-MSSQL/
 ├── SqlSizer-MSSQL.psm1    # Module loader
 ├── SqlSizer-MSSQL.psd1    # Module manifest
 ├── Public/                 # Exported cmdlets (90+ functions)
-│   ├── Find-Subset-Refactored.ps1
-│   ├── Find-RemovalSubset-Refactored.ps1
+│   ├── Find-Subset.ps1
+│   ├── Find-RemovalSubset.ps1
 │   ├── Initialize-StartSet.ps1
 │   ├── Copy-DataFromSubset.ps1
 │   └── ... (other cmdlets)
@@ -330,7 +330,7 @@ CREATE TABLE SqlSizer_Session123.Sales_Customer (
 │  2. Initialize-StartSet                                         │
 │     └─ Inserts seed records into processing tables             │
 │                                                                 │
-│  3. Find-Subset-Refactored                                      │
+│  3. Find-Subset                                      │
 │     ├─ Traverses FK relationships                              │
 │     ├─ Populates processing tables                             │
 │     └─ Creates Result_* views                                  │
@@ -353,8 +353,8 @@ $session1 = Start-SqlSizerSession -Database $db ...  # Creates SqlSizer_abc123
 $session2 = Start-SqlSizerSession -Database $db ...  # Creates SqlSizer_def456
 
 # Sessions are completely independent
-Find-Subset-Refactored -SessionId $session1 ...
-Find-Subset-Refactored -SessionId $session2 ...
+Find-Subset -SessionId $session1 ...
+Find-Subset -SessionId $session2 ...
 
 # Clean up individually or all at once
 Clear-SqlSizerSession -SessionId $session1 ...
@@ -388,7 +388,7 @@ $query.Top = 100
 Initialize-StartSet -Database "Production" -Queries @($query) -SessionId $sessionId ...
 
 # 5. Find complete subset
-Find-Subset-Refactored -Database "Production" -SessionId $sessionId `
+Find-Subset -Database "Production" -SessionId $sessionId `
     -DatabaseInfo $info -ConnectionInfo $connection -FullSearch $false
 
 # 6. Create new database with subset
@@ -411,7 +411,7 @@ Clear-SqlSizerSession -SessionId $sessionId ...
 # Find all records that must be deleted to remove target records
 Initialize-StartSet -Queries $removalQueries -SessionId $sessionId ...
 
-Find-RemovalSubset-Refactored -Database $db -SessionId $sessionId `
+Find-RemovalSubset -Database $db -SessionId $sessionId `
     -DatabaseInfo $info -ConnectionInfo $connection
 
 # Delete in correct order (children before parents)
@@ -460,8 +460,8 @@ Ensure indexes exist on:
 | `Get-DatabaseInfo` | Extract database metadata |
 | `Start-SqlSizerSession` | Initialize subsetting session |
 | `Initialize-StartSet` | Define seed records |
-| `Find-Subset-Refactored` | Find complete subset |
-| `Find-RemovalSubset-Refactored` | Find deletion dependencies |
+| `Find-Subset` | Find complete subset |
+| `Find-RemovalSubset` | Find deletion dependencies |
 | `Get-SubsetTables` | List tables with subset data |
 | `Copy-DataFromSubset` | Copy subset to another database |
 | `Remove-FoundSubsetFromDatabase` | Delete subset records |

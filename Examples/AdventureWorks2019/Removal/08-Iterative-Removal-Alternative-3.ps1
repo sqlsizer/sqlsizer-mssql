@@ -38,9 +38,9 @@ while ($true)
     $query.Where = "[`$table].BusinessEntityID > $i"
     $query.OrderBy = "[`$table].BusinessEntityID ASC"
 
-    Initialize-StartSet-Refactored -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId -StartIteration $startIteration
+    Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId -StartIteration $startIteration
     # Use refactored removal subset algorithm (Blue = InboundOnly)
-    $result = Find-RemovalSubset-Refactored -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId -StartIteration $startIteration  
+    $result = Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId -StartIteration $startIteration  
     $empty = Test-FoundSubsetIsEmpty -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId -StartIteration $startIteration
 
     $startIteration += $result.CompletedIterations
