@@ -1,0 +1,680 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="164" errors="0" failures="62" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-02-07" time="15:51:09">
+  <environment nunit-version="2.5.8.0" os-version="10.0.26200" cwd="C:\Users\marci\sqlsizer-mssql" platform="Microsoft Windows 11 Home|C:\WINDOWS|\Device\Harddisk0\Partition3" clr-version="9.0.10" user-domain="KOMPUTER" user="marci" machine-name="KOMPUTER" />
+  <culture-info current-culture="en-US" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Failure" success="False" time="8.0542" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="C:\Users\marci\sqlsizer-mssql\Tests\Integration.Tests.ps1" executed="True" result="Failure" success="False" time="0.793" asserts="0" description="C:\Users\marci\sqlsizer-mssql\Tests\Integration.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Find-Subset-Refactored Integration Tests" executed="True" result="Failure" success="False" time="0" asserts="0" description="Find-Subset-Refactored Integration Tests">
+            <results>
+              <test-suite type="TestFixture" name="Find-Subset-Refactored Integration Tests.State Transitions" executed="True" result="Failure" success="False" time="0" asserts="0" description="Find-Subset-Refactored Integration Tests.State Transitions">
+                <results>
+                  <test-case description="Should correctly transition Include -&gt; Include on outgoing FK" name="Find-Subset-Refactored Integration Tests.State Transitions.Should correctly transition Include -&gt; Include on outgoing FK" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Should correctly transition Include -&gt; Pending on incoming FK (non-full search)" name="Find-Subset-Refactored Integration Tests.State Transitions.Should correctly transition Include -&gt; Pending on incoming FK (non-full search)" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Find-Subset-Refactored Integration Tests.Constraint Handling" executed="True" result="Failure" success="False" time="0" asserts="0" description="Find-Subset-Refactored Integration Tests.Constraint Handling">
+                <results>
+                  <test-case description="Should respect MaxDepth constraint" name="Find-Subset-Refactored Integration Tests.Constraint Handling.Should respect MaxDepth constraint" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Should respect Top constraint" name="Find-Subset-Refactored Integration Tests.Constraint Handling.Should respect Top constraint" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Find-Subset-Refactored Integration Tests.Cycle Prevention" executed="True" result="Failure" success="False" time="0" asserts="0" description="Find-Subset-Refactored Integration Tests.Cycle Prevention">
+                <results>
+                  <test-case description="Should handle circular FK relationships" name="Find-Subset-Refactored Integration Tests.Cycle Prevention.Should handle circular FK relationships" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Find-Subset-Refactored Integration Tests.Pending Resolution" executed="True" result="Failure" success="False" time="0" asserts="0" description="Find-Subset-Refactored Integration Tests.Pending Resolution">
+                <results>
+                  <test-case description="Should resolve Pending to Include when reachable" name="Find-Subset-Refactored Integration Tests.Pending Resolution.Should resolve Pending to Include when reachable" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Should resolve Pending to Exclude when unreachable" name="Find-Subset-Refactored Integration Tests.Pending Resolution.Should resolve Pending to Exclude when unreachable" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Performance Tests" executed="True" result="Failure" success="False" time="0" asserts="0" description="Performance Tests">
+            <results>
+              <test-case description="Should complete within reasonable time for small dataset" name="Performance Tests.Should complete within reasonable time for small dataset" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Should handle large datasets efficiently" name="Performance Tests.Should handle large datasets efficiently" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Should use query caching effectively" name="Performance Tests.Should use query caching effectively" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\marci\sqlsizer-mssql\Tests\QueryBuilders.Tests.ps1" executed="True" result="Success" success="True" time="4.8824" asserts="0" description="C:\Users\marci\sqlsizer-mssql\Tests\QueryBuilders.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="New-GetNextOperationQuery" executed="True" result="Success" success="True" time="0.2007" asserts="0" description="New-GetNextOperationQuery">
+            <results>
+              <test-case description="Generates DFS query when UseDfs is true" name="New-GetNextOperationQuery.Generates DFS query when UseDfs is true" time="0.0961" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Generates BFS query when UseDfs is false" name="New-GetNextOperationQuery.Generates BFS query when UseDfs is false" time="0.0144" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes required fields in SELECT" name="New-GetNextOperationQuery.Includes required fields in SELECT" time="0.0359" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters by Status IS NULL" name="New-GetNextOperationQuery.Filters by Status IS NULL" time="0.0125" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns TOP 1 result" name="New-GetNextOperationQuery.Returns TOP 1 result" time="0.0143" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-MarkOperationInProgressQuery" executed="True" result="Success" success="True" time="0.3553" asserts="0" description="New-MarkOperationInProgressQuery">
+            <results>
+              <test-suite type="TestFixture" name="New-MarkOperationInProgressQuery.Unlimited batch size" executed="True" result="Success" success="True" time="0.0659" asserts="0" description="New-MarkOperationInProgressQuery.Unlimited batch size">
+                <results>
+                  <test-case description="Sets Processed to ToProcess when MaxBatchSize is -1" name="New-MarkOperationInProgressQuery.Unlimited batch size.Sets Processed to ToProcess when MaxBatchSize is -1" time="0.0244" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Filters by correct table, state, and depth" name="New-MarkOperationInProgressQuery.Unlimited batch size.Filters by correct table, state, and depth" time="0.0193" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Sets Status to 0 (in progress)" name="New-MarkOperationInProgressQuery.Unlimited batch size.Sets Status to 0 (in progress)" time="0.0136" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="New-MarkOperationInProgressQuery.Limited batch size" executed="True" result="Success" success="True" time="0.1304" asserts="0" description="New-MarkOperationInProgressQuery.Limited batch size">
+                <results>
+                  <test-case description="Uses batch logic when MaxBatchSize is set" name="New-MarkOperationInProgressQuery.Limited batch size.Uses batch logic when MaxBatchSize is set" time="0.0189" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Includes batch size in query" name="New-MarkOperationInProgressQuery.Limited batch size.Includes batch size in query" time="0.0173" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Filters by @Remaining &gt; 0" name="New-MarkOperationInProgressQuery.Limited batch size.Filters by @Remaining &gt; 0" time="0.0169" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-case description="Includes SessionId in WHERE clause" name="New-MarkOperationInProgressQuery.Includes SessionId in WHERE clause" time="0.0151" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-CompleteOperationsQuery" executed="True" result="Success" success="True" time="0.4474" asserts="0" description="New-CompleteOperationsQuery">
+            <results>
+              <test-case description="Resets operations that hit batch limit" name="New-CompleteOperationsQuery.Resets operations that hit batch limit" time="0.0216" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Marks fully processed operations as complete" name="New-CompleteOperationsQuery.Marks fully processed operations as complete" time="0.0141" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters by SessionId" name="New-CompleteOperationsQuery.Filters by SessionId" time="0.0211" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses correct iteration number" name="New-CompleteOperationsQuery.Uses correct iteration number" time="0.0121" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Contains comment explaining logic" name="New-CompleteOperationsQuery.Contains comment explaining logic" time="0.0135" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-GetIterationStatisticsQuery" executed="True" result="Success" success="True" time="0.5279" asserts="0" description="New-GetIterationStatisticsQuery">
+            <results>
+              <test-case description="Selects all required statistics" name="New-GetIterationStatisticsQuery.Selects all required statistics" time="0.0196" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Filters by SessionId" name="New-GetIterationStatisticsQuery.Filters by SessionId" time="0.0125" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Calculates remaining records correctly" name="New-GetIterationStatisticsQuery.Calculates remaining records correctly" time="0.0152" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses MAX for depth" name="New-GetIterationStatisticsQuery.Uses MAX for depth" time="0.0123" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Counts completed operations" name="New-GetIterationStatisticsQuery.Counts completed operations" time="0.0122" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-PendingResolutionQuery" executed="True" result="Success" success="True" time="0.6563" asserts="0" description="New-PendingResolutionQuery">
+            <results>
+              <test-case description="Generates query for non-Synapse" name="New-PendingResolutionQuery.Generates query for non-Synapse" time="0.0274" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Omits GO for Synapse" name="New-PendingResolutionQuery.Omits GO for Synapse" time="0.013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Updates Pending to Include" name="New-PendingResolutionQuery.Updates Pending to Include" time="0.0145" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Joins on all primary key columns" name="New-PendingResolutionQuery.Joins on all primary key columns" time="0.0171" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses correct table name" name="New-PendingResolutionQuery.Uses correct table name" time="0.0131" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes iteration in comment" name="New-PendingResolutionQuery.Includes iteration in comment" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Declares @Changed variable" name="New-PendingResolutionQuery.Declares @Changed variable" time="0.0143" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-ExcludePendingQuery" executed="True" result="Success" success="True" time="0.7508" asserts="0" description="New-ExcludePendingQuery">
+            <results>
+              <test-case description="Updates Pending to Exclude" name="New-ExcludePendingQuery.Updates Pending to Exclude" time="0.019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses correct processing table" name="New-ExcludePendingQuery.Uses correct processing table" time="0.0122" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes GO for non-Synapse" name="New-ExcludePendingQuery.Includes GO for non-Synapse" time="0.0128" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Omits GO for Synapse" name="New-ExcludePendingQuery.Omits GO for Synapse" time="0.0172" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes descriptive comment" name="New-ExcludePendingQuery.Includes descriptive comment" time="0.0182" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-CTETraversalQuery - Structure Tests" executed="True" result="Success" success="True" time="1.2065" asserts="0" description="New-CTETraversalQuery - Structure Tests">
+            <results>
+              <test-suite type="TestFixture" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation" executed="True" result="Success" success="True" time="0.2834" asserts="0" description="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation">
+                <results>
+                  <test-case description="Generates single key column for single PK" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Generates single key column for single PK" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Generates multiple key columns for composite PK in source" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Generates multiple key columns for composite PK in source" time="0.018" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Generates correct INSERT column list for single key" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Generates correct INSERT column list for single key" time="0.0171" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Generates correct INSERT column list for composite key" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Generates correct INSERT column list for composite key" time="0.0205" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Does not include hardcoded 8-column key list" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Does not include hardcoded 8-column key list" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Handles incoming direction with different key columns" name="New-CTETraversalQuery - Structure Tests.Dynamic Key Column Generation.Handles incoming direction with different key columns" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-case description="Includes CTE structure" name="New-CTETraversalQuery - Structure Tests.Includes CTE structure" time="0.0663" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes INSERT INTO statement" name="New-CTETraversalQuery - Structure Tests.Includes INSERT INTO statement" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes operations table update" name="New-CTETraversalQuery - Structure Tests.Includes operations table update" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes FK name in comment" name="New-CTETraversalQuery - Structure Tests.Includes FK name in comment" time="0.0158" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Shows OUTGOING direction in comment" name="New-CTETraversalQuery - Structure Tests.Shows OUTGOING direction in comment" time="0.0199" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Shows INCOMING direction in comment" name="New-CTETraversalQuery - Structure Tests.Shows INCOMING direction in comment" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Omits GO for Synapse" name="New-CTETraversalQuery - Structure Tests.Omits GO for Synapse" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1" executed="True" result="Failure" success="False" time="0.9418" asserts="0" description="C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-NewTraversalState" executed="True" result="Failure" success="False" time="0.0266" asserts="0" description="Get-NewTraversalState">
+            <results>
+              <test-suite type="TestFixture" name="Get-NewTraversalState.Outgoing Direction" executed="True" result="Failure" success="False" time="0" asserts="0" description="Get-NewTraversalState.Outgoing Direction">
+                <results>
+                  <test-case description="Include state remains Include" name="Get-NewTraversalState.Outgoing Direction.Include state remains Include" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Pending state remains Pending" name="Get-NewTraversalState.Outgoing Direction.Pending state remains Pending" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Exclude state remains Exclude" name="Get-NewTraversalState.Outgoing Direction.Exclude state remains Exclude" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-NewTraversalState.Incoming Direction" executed="True" result="Failure" success="False" time="0" asserts="0" description="Get-NewTraversalState.Incoming Direction">
+                <results>
+                  <test-case description="Include state becomes Pending when FullSearch is false" name="Get-NewTraversalState.Incoming Direction.Include state becomes Pending when FullSearch is false" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Include state remains Include when FullSearch is true" name="Get-NewTraversalState.Incoming Direction.Include state remains Include when FullSearch is true" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Pending state remains Pending" name="Get-NewTraversalState.Incoming Direction.Pending state remains Pending" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Exclude state remains Exclude" name="Get-NewTraversalState.Incoming Direction.Exclude state remains Exclude" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Get-NewTraversalState.TraversalConfiguration Override" executed="True" result="Failure" success="False" time="0" asserts="0" description="Get-NewTraversalState.TraversalConfiguration Override">
+                <results>
+                  <test-case description="Applies StateOverride when configuration is provided" name="Get-NewTraversalState.TraversalConfiguration Override.Applies StateOverride when configuration is provided" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                  <test-case description="Uses default state when no override is configured" name="Get-NewTraversalState.TraversalConfiguration Override.Uses default state when no override is configured" time="0" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                      <stack-trace />
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-TraversalConstraints" executed="True" result="Failure" success="False" time="0.0512" asserts="0" description="Get-TraversalConstraints">
+            <results>
+              <test-case description="Returns null constraints when no configuration provided" name="Get-TraversalConstraints.Returns null constraints when no configuration provided" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns MaxDepth when configured" name="Get-TraversalConstraints.Returns MaxDepth when configured" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns Top when configured" name="Get-TraversalConstraints.Returns Top when configured" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns both MaxDepth and Top when both configured" name="Get-TraversalConstraints.Returns both MaxDepth and Top when both configured" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-ShouldTraverseDirection" executed="True" result="Failure" success="False" time="0.2129" asserts="0" description="Test-ShouldTraverseDirection">
+            <results>
+              <test-suite type="TestFixture" name="Test-ShouldTraverseDirection.Outgoing Direction" executed="True" result="Failure" success="False" time="0.0818" asserts="0" description="Test-ShouldTraverseDirection.Outgoing Direction">
+                <results>
+                  <test-case description="Returns true for Include state" name="Test-ShouldTraverseDirection.Outgoing Direction.Returns true for Include state" time="0.0222" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:206</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns true for Pending state" name="Test-ShouldTraverseDirection.Outgoing Direction.Returns true for Pending state" time="0.0183" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:214</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns false for Exclude state" name="Test-ShouldTraverseDirection.Outgoing Direction.Returns false for Exclude state" time="0.0155" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:222</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns false for InboundOnly state" name="Test-ShouldTraverseDirection.Outgoing Direction.Returns false for InboundOnly state" time="0.0156" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:230</stack-trace>
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="Test-ShouldTraverseDirection.Incoming Direction" executed="True" result="Failure" success="False" time="0.1546" asserts="0" description="Test-ShouldTraverseDirection.Incoming Direction">
+                <results>
+                  <test-case description="Returns true for Include state" name="Test-ShouldTraverseDirection.Incoming Direction.Returns true for Include state" time="0.0178" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:240</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns true for InboundOnly state" name="Test-ShouldTraverseDirection.Incoming Direction.Returns true for InboundOnly state" time="0.0147" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:248</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns false for Pending state" name="Test-ShouldTraverseDirection.Incoming Direction.Returns false for Pending state" time="0.0179" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:256</stack-trace>
+                    </failure>
+                  </test-case>
+                  <test-case description="Returns false for Exclude state" name="Test-ShouldTraverseDirection.Incoming Direction.Returns false for Exclude state" time="0.0146" asserts="0" success="False" result="Failure" executed="True">
+                    <failure>
+                      <message>RuntimeException: Unable to find type [TraversalState].</message>
+                      <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:264</stack-trace>
+                    </failure>
+                  </test-case>
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-TopClause" executed="True" result="Success" success="True" time="0.2959" asserts="0" description="Get-TopClause">
+            <results>
+              <test-case description="Returns global MaxBatchSize when set" name="Get-TopClause.Returns global MaxBatchSize when set" time="0.027" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns constraint Top when MaxBatchSize is -1" name="Get-TopClause.Returns constraint Top when MaxBatchSize is -1" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty string when both are unlimited" name="Get-TopClause.Returns empty string when both are unlimited" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns empty string when no constraints provided" name="Get-TopClause.Returns empty string when no constraints provided" time="0.0155" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Prioritizes MaxBatchSize over constraint Top" name="Get-TopClause.Prioritizes MaxBatchSize over constraint Top" time="0.0109" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-ForeignKeyRelationships" executed="True" result="Failure" success="False" time="0.3205" asserts="0" description="Get-ForeignKeyRelationships">
+            <results>
+              <test-case description="Returns ForeignKeys for Outgoing direction" name="Get-ForeignKeyRelationships.Returns ForeignKeys for Outgoing direction" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns IsReferencedBy for Incoming direction" name="Get-ForeignKeyRelationships.Returns IsReferencedBy for Incoming direction" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-TargetTableInfo" executed="True" result="Failure" success="False" time="0.3402" asserts="0" description="Get-TargetTableInfo">
+            <results>
+              <test-case description="Returns target table info for Outgoing direction" name="Get-TargetTableInfo.Returns target table info for Outgoing direction" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns source table info for Incoming direction" name="Get-TargetTableInfo.Returns source table info for Incoming direction" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-ShouldSkipTable" executed="True" result="Failure" success="False" time="0.4115" asserts="0" description="Test-ShouldSkipTable">
+            <results>
+              <test-case description="Returns true when table is in ignored list" name="Test-ShouldSkipTable.Returns true when table is in ignored list" time="0.0163" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TableInfo2].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:376</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns true when TableInfo is null" name="Test-ShouldSkipTable.Returns true when TableInfo is null" time="0.0161" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TableInfo2].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:389</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns true when table has no primary key" name="Test-ShouldSkipTable.Returns true when table has no primary key" time="0.0157" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [TableInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:398</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns false when table is valid and not ignored" name="Test-ShouldSkipTable.Returns false when table is valid and not ignored" time="0.016" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [TableInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\TraversalHelpers.Tests.ps1:412</stack-trace>
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-JoinConditions" executed="True" result="Failure" success="False" time="0.433" asserts="0" description="Get-JoinConditions">
+            <results>
+              <test-case description="Generates correct JOIN conditions for single column FK" name="Get-JoinConditions.Generates correct JOIN conditions for single column FK" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Generates correct JOIN conditions for multi-column FK" name="Get-JoinConditions.Generates correct JOIN conditions for multi-column FK" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Uses custom aliases correctly" name="Get-JoinConditions.Uses custom aliases correctly" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-AdditionalWhereConditions" executed="True" result="Success" success="True" time="0.5129" asserts="0" description="Get-AdditionalWhereConditions">
+            <results>
+              <test-case description="Returns empty array when no constraints and FullSearch is true" name="Get-AdditionalWhereConditions.Returns empty array when no constraints and FullSearch is true" time="0.0178" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes cycle prevention when FullSearch is false" name="Get-AdditionalWhereConditions.Includes cycle prevention when FullSearch is false" time="0.013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes MaxDepth constraint when provided" name="Get-AdditionalWhereConditions.Includes MaxDepth constraint when provided" time="0.0114" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes both MaxDepth and cycle prevention" name="Get-AdditionalWhereConditions.Includes both MaxDepth and cycle prevention" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Ignores Top constraint (not used in WHERE clause)" name="Get-AdditionalWhereConditions.Ignores Top constraint (not used in WHERE clause)" time="0.0139" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1" executed="True" result="Failure" success="False" time="1.4369" asserts="0" description="C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Assert-NotNull Tests" executed="True" result="Success" success="True" time="0.0821" asserts="0" description="Assert-NotNull Tests">
+            <results>
+              <test-case description="Returns value when not null" name="Assert-NotNull Tests.Returns value when not null" time="0.013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws ArgumentNullException when null" name="Assert-NotNull Tests.Throws ArgumentNullException when null" time="0.0367" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes parameter name in error" name="Assert-NotNull Tests.Includes parameter name in error" time="0.0133" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Uses custom message when provided" name="Assert-NotNull Tests.Uses custom message when provided" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-NotNullOrEmpty Tests" executed="True" result="Success" success="True" time="0.1712" asserts="0" description="Assert-NotNullOrEmpty Tests">
+            <results>
+              <test-case description="Returns value when not empty" name="Assert-NotNullOrEmpty Tests.Returns value when not empty" time="0.0181" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when null" name="Assert-NotNullOrEmpty Tests.Throws when null" time="0.0178" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when empty string" name="Assert-NotNullOrEmpty Tests.Throws when empty string" time="0.0169" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when whitespace only" name="Assert-NotNullOrEmpty Tests.Throws when whitespace only" time="0.0166" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes parameter name in exception" name="Assert-NotNullOrEmpty Tests.Includes parameter name in exception" time="0.0126" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-GreaterThan Tests" executed="True" result="Success" success="True" time="0.2476" asserts="0" description="Assert-GreaterThan Tests">
+            <results>
+              <test-case description="Returns value when greater than minimum" name="Assert-GreaterThan Tests.Returns value when greater than minimum" time="0.0177" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when equal to minimum" name="Assert-GreaterThan Tests.Throws when equal to minimum" time="0.0223" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when less than minimum" name="Assert-GreaterThan Tests.Throws when less than minimum" time="0.0166" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Includes actual value in error message" name="Assert-GreaterThan Tests.Includes actual value in error message" time="0.0127" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-GreaterThanOrEqual Tests" executed="True" result="Success" success="True" time="0.3043" asserts="0" description="Assert-GreaterThanOrEqual Tests">
+            <results>
+              <test-case description="Returns value when greater than minimum" name="Assert-GreaterThanOrEqual Tests.Returns value when greater than minimum" time="0.0147" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns value when equal to minimum" name="Assert-GreaterThanOrEqual Tests.Returns value when equal to minimum" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when less than minimum" name="Assert-GreaterThanOrEqual Tests.Throws when less than minimum" time="0.0175" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-InRange Tests" executed="True" result="Success" success="True" time="0.3829" asserts="0" description="Assert-InRange Tests">
+            <results>
+              <test-case description="Returns value when in range" name="Assert-InRange Tests.Returns value when in range" time="0.0149" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns value at minimum boundary" name="Assert-InRange Tests.Returns value at minimum boundary" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns value at maximum boundary" name="Assert-InRange Tests.Returns value at maximum boundary" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when below minimum" name="Assert-InRange Tests.Throws when below minimum" time="0.0174" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when above maximum" name="Assert-InRange Tests.Throws when above maximum" time="0.0177" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-ValidEnum Tests" executed="True" result="Failure" success="False" time="0.4521" asserts="0" description="Assert-ValidEnum Tests">
+            <results>
+              <test-case description="Returns value when valid enum member" name="Assert-ValidEnum Tests.Returns value when valid enum member" time="0.0186" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalState].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:142</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Throws when invalid enum value" name="Assert-ValidEnum Tests.Throws when invalid enum value" time="0.0165" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Lists valid enum values in error" name="Assert-ValidEnum Tests.Lists valid enum values in error" time="0.0272" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>Expected regular expression 'Include' to match 'Unable to find type [TraversalState].', but it did not match.</message>
+                  <stack-trace>at $_.Exception.Message | Should -Match "Include", C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:156
+at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:156</stack-trace>
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-ValidSessionId Tests" executed="True" result="Success" success="True" time="0.5729" asserts="0" description="Assert-ValidSessionId Tests">
+            <results>
+              <test-case description="Returns valid session ID" name="Assert-ValidSessionId Tests.Returns valid session ID" time="0.0144" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when null" name="Assert-ValidSessionId Tests.Throws when null" time="0.0174" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when empty" name="Assert-ValidSessionId Tests.Throws when empty" time="0.0193" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when contains semicolon" name="Assert-ValidSessionId Tests.Throws when contains semicolon" time="0.0161" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when contains quote" name="Assert-ValidSessionId Tests.Throws when contains quote" time="0.0171" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when too long" name="Assert-ValidSessionId Tests.Throws when too long" time="0.0178" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Accepts 100 character session ID" name="Assert-ValidSessionId Tests.Accepts 100 character session ID" time="0.0115" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-ValidConnectionInfo Tests" executed="True" result="Failure" success="False" time="0.658" asserts="0" description="Assert-ValidConnectionInfo Tests">
+            <results>
+              <test-case description="Returns valid connection info" name="Assert-ValidConnectionInfo Tests.Returns valid connection info" time="0.0161" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [SqlConnectionInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:199</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Throws when connection info is null" name="Assert-ValidConnectionInfo Tests.Throws when connection info is null" time="0.0212" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when server is null" name="Assert-ValidConnectionInfo Tests.Throws when server is null" time="0.0138" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [SqlConnectionInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:211</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Throws when server is empty" name="Assert-ValidConnectionInfo Tests.Throws when server is empty" time="0.013" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [SqlConnectionInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:216</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Accepts connection with AccessToken" name="Assert-ValidConnectionInfo Tests.Accepts connection with AccessToken" time="0.0137" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [SqlConnectionInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:222</stack-trace>
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-ValidatedTableInfo Tests" executed="True" result="Failure" success="False" time="0.6873" asserts="0" description="Get-ValidatedTableInfo Tests">
+            <results>
+              <test-case description="Returns table when found" name="Get-ValidatedTableInfo Tests.Returns table when found" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Throws when table not found and ThrowIfNotFound is true" name="Get-ValidatedTableInfo Tests.Throws when table not found and ThrowIfNotFound is true" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns null when table not found and ThrowIfNotFound is false" name="Get-ValidatedTableInfo Tests.Returns null when table not found and ThrowIfNotFound is false" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Throws when table has no primary key and RequirePrimaryKey is true" name="Get-ValidatedTableInfo Tests.Throws when table has no primary key and RequirePrimaryKey is true" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Returns table with no PK when RequirePrimaryKey is false" name="Get-ValidatedTableInfo Tests.Returns table with no PK when RequirePrimaryKey is false" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+              <test-case description="Includes available tables in error message" name="Get-ValidatedTableInfo Tests.Includes available tables in error message" time="0" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>This test should run but it did not. Most likely a setup in some parent block failed.</message>
+                  <stack-trace />
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-SqlInjectionRisk Tests" executed="True" result="Success" success="True" time="0.838" asserts="0" description="Test-SqlInjectionRisk Tests">
+            <results>
+              <test-case description="Returns false for safe string" name="Test-SqlInjectionRisk Tests.Returns false for safe string" time="0.0171" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for statement terminator" name="Test-SqlInjectionRisk Tests.Returns true for statement terminator" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for comment injection" name="Test-SqlInjectionRisk Tests.Returns true for comment injection" time="0.0109" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for OR injection" name="Test-SqlInjectionRisk Tests.Returns true for OR injection" time="0.0112" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for AND injection" name="Test-SqlInjectionRisk Tests.Returns true for AND injection" time="0.0108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for EXEC command" name="Test-SqlInjectionRisk Tests.Returns true for EXEC command" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for DROP TABLE" name="Test-SqlInjectionRisk Tests.Returns true for DROP TABLE" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for DELETE FROM" name="Test-SqlInjectionRisk Tests.Returns true for DELETE FROM" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Returns true for xp_ extended proc" name="Test-SqlInjectionRisk Tests.Returns true for xp_ extended proc" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Throws when -Throw is specified and risk found" name="Test-SqlInjectionRisk Tests.Throws when -Throw is specified and risk found" time="0.0203" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Does not throw when -Throw is specified but no risk" name="Test-SqlInjectionRisk Tests.Does not throw when -Throw is specified but no risk" time="0.0159" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-ValidTraversalState Tests" executed="True" result="Failure" success="False" time="0.9094" asserts="0" description="Assert-ValidTraversalState Tests">
+            <results>
+              <test-case description="Returns valid Include state" name="Assert-ValidTraversalState Tests.Returns valid Include state" time="0.017" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalState].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:377</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns valid Exclude state" name="Assert-ValidTraversalState Tests.Returns valid Exclude state" time="0.0168" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalState].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:382</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns valid Pending state" name="Assert-ValidTraversalState Tests.Returns valid Pending state" time="0.0155" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalState].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:387</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns valid InboundOnly state" name="Assert-ValidTraversalState Tests.Returns valid InboundOnly state" time="0.0148" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalState].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:392</stack-trace>
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Assert-ValidTraversalDirection Tests" executed="True" result="Failure" success="False" time="0.9476" asserts="0" description="Assert-ValidTraversalDirection Tests">
+            <results>
+              <test-case description="Returns valid Outgoing direction" name="Assert-ValidTraversalDirection Tests.Returns valid Outgoing direction" time="0.0168" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalDirection].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:399</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns valid Incoming direction" name="Assert-ValidTraversalDirection Tests.Returns valid Incoming direction" time="0.0143" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>RuntimeException: Unable to find type [TraversalDirection].</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:404</stack-trace>
+                </failure>
+              </test-case>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-ValidationError Tests" executed="True" result="Success" success="True" time="1.0004" asserts="0" description="New-ValidationError Tests">
+            <results>
+              <test-case description="Creates error object with all properties" name="New-ValidationError Tests.Creates error object with all properties" time="0.0335" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="Creates error object without optional values" name="New-ValidationError Tests.Creates error object without optional values" time="0.0123" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Write-ValidationWarning Tests" executed="True" result="Success" success="True" time="1.024" asserts="0" description="Write-ValidationWarning Tests">
+            <results>
+              <test-case description="Writes warning with parameter name" name="Write-ValidationWarning Tests.Writes warning with parameter name" time="0.0169" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Test-TableHasPrimaryKey Tests" executed="True" result="Failure" success="False" time="1.0805" asserts="0" description="Test-TableHasPrimaryKey Tests">
+            <results>
+              <test-case description="Returns true when table has primary key" name="Test-TableHasPrimaryKey Tests.Returns true when table has primary key" time="0.0197" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [TableInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:448</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Returns false when table has no primary key" name="Test-TableHasPrimaryKey Tests.Returns false when table has no primary key" time="0.0134" asserts="0" success="False" result="Failure" executed="True">
+                <failure>
+                  <message>PSArgumentException: Cannot find type [TableInfo]: verify that the assembly containing this type is loaded.</message>
+                  <stack-trace>at &lt;ScriptBlock&gt;, C:\Users\marci\sqlsizer-mssql\Tests\ValidationHelpers.Tests.ps1:457</stack-trace>
+                </failure>
+              </test-case>
+              <test-case description="Throws when table is null" name="Test-TableHasPrimaryKey Tests.Throws when table is null" time="0.0164" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>
