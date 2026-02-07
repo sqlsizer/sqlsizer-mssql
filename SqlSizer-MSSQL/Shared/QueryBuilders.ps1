@@ -93,6 +93,18 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
     INNER JOIN SourceRecords src ON $srcTableJoinClause
 "@
+        
+        # Standalone FROM clause for UPDATE (doesn't use CTE)
+        $fromClauseForUpdate = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
+    INNER JOIN $SourceProcessing src ON $srcTableJoinClause
+WHERE src.Iteration IN (
+    SELECT FoundIteration 
+    FROM SqlSizer.Operations 
+    WHERE Status = 0 AND SessionId = '$SessionId'
+)
+"@
     }
     else # Incoming
     {
@@ -109,6 +121,17 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
         $fromClause = @"
 FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     INNER JOIN SourceRecords src ON $joinClause
+"@
+        
+        # Standalone FROM clause for UPDATE (doesn't use CTE)
+        $fromClauseForUpdate = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN $SourceProcessing src ON $joinClause
+WHERE src.Iteration IN (
+    SELECT FoundIteration 
+    FROM SqlSizer.Operations 
+    WHERE Status = 0 AND SessionId = '$SessionId'
+)
 "@
     }
 
@@ -198,8 +221,8 @@ WHERE existing.Color = $([int][TraversalState]::Pending)
     AND EXISTS (
         SELECT 1 FROM (
             SELECT DISTINCT $targetKeyList
-            $fromClause
-            WHERE tgt.$($targetColumns[0].Name) IS NOT NULL
+            $fromClauseForUpdate
+                AND tgt.$($targetColumns[0].Name) IS NOT NULL
                 $whereClause
         ) nr
         WHERE $updateKeyClause
