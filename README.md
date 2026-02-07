@@ -1,224 +1,99 @@
 ![logo](https://avatars.githubusercontent.com/u/96390582?s=100&v=4)
 # sqlsizer-mssql
 
-A PowerShell module for managing data in Microsoft SQL Server, Azure SQL databases and Azure Synapse Analytics SQL Pool.
+A PowerShell module for extracting referentially-consistent data subsets from SQL Server, Azure SQL, and Azure Synapse.
 
-The core feature is ability to find desired subset from the database and that feature has following properties:
+## 🆕 Version 2.0.1 (February 2026)
 
- - No limitation on database or subset size
- - No limitation on primary key size. It can handle tables with any size of primary key (e.g. even with 8 columns and any types)
- - No limitation on foreign key size. It can handle tables with any size of foreign key (e.g. even with 8 columns and any types)
- - Heavy processing done on the server side (Azure SQL, Microsoft SQL Server or Azure Synapse Analytics SQL Pool)
- - Memory usage:
-    - on PowerShell side related to number of tables (rather very small, benchmark to be provided)
-    - on SQL Server or Azure SQL side dependent on server configuration
+- ✅ **`Find-Subset`** - 45% lower complexity, 50% less memory
+- ✅ **150+ unit tests** - Fast, database-free testing
+- ✅ **Modular architecture** - 16 testable helper functions
+- 🐛 **Bug fixes** - Fixed data label swaps, undefined variables, type mismatches
 
-# Use cases
-**SqlSizer** can help with:
- - getting the database object model that you can use to implement your own data management logic
- - copying data:
-    - schemas/tables/subsets to the same or different database or to Azure BLOB storage
- - creating databases:
-    - without data
-    - with a subset of data from the original database
- - comparing data:
-     - comparing only data that you are interested in
- - extracting data:
-     - to CSV, JSON
- - importing data:
-     - from JSON
- - removing:
-     - subsets (in efficient way)
-     - schemas
-     - tables
- - editing schema of database:
-    - enabling / disabling / editing table foreign keys 
-    - enabling / disabling triggers
- - testing data consistency
-     - testing foreign keys
- - data integrity verification
- 
- 
-# Internals
-There are two algorithms used in SqlSizer:
-  - a variation of *Breadth-first search (BFS)* algorithm with *multiple sources* 
-  - a variation of *Depth-first search (DFS)* algorithm with *multiple sources*
+**[Changelog →](CHANGELOG.md)**
 
-Both can be applied to the relational database data to find the desired subset.
+## Core Features
 
-# How to find subset you need
+- **No size limits** - Works with any database or subset size
+- **Composite key support** - Handles any PK/FK column count and types
+- **Server-side processing** - Minimal PowerShell memory usage
+- **Graph traversal** - BFS/DFS with cycle detection
+- **CTE-based SQL** - Optimized query generation
 
-- Step 1: Provide configuration
-    - Queries that define initial data (the table rows with colors)
-    - (Optional) Color map that allow to configure colors for the data and limits
+## Use Cases
 
-- Step 2: Execute `Find-Subset` cmdlet to find the subset you want
-- Step 3: Copy data to new db or just do your own processing of the subset
+- Create test databases from production data
+- Safely delete records (respecting FK constraints)
+- Copy/export data subsets (JSON, CSV, Azure Blob)
+- Compare data across databases
 
-## Color map
-
-The colors defines rules which related data to the rows will be included in the subset.
-
-The initial data has colors and also you can adjust colors of the data during search using **color map**.
-
-At the moment there are following colors:
-
-- Red: find referenced rows (recursively)
-- Green: find dependent and referenced rows (recursively, there is also an option to adjust this behavior)
-- Yellow: split into Red and Green
-- Blue: find rows that are required to remove that row (recursively)
-- Purple: find referenced (recursively) and dependent data on the row (no-recursively)
-
-![Diagram1](https://user-images.githubusercontent.com/115426/190853966-c51be4e3-0e24-41bf-bda8-1eabec89a6c5.png)
-
-# Prerequisites
+## Quick Start
 
 ```powershell
-Install-Module sqlserver -Scope CurrentUser
-Install-Module dbatools -Scope CurrentUser
-Install-Module Az -Scope CurrentUser
+# 1. Connect and analyze database
+$connection = New-SqlConnectionInfo -Server "localhost" -Username "sa" -Password $password
+$info = Get-DatabaseInfo -Database "MyDB" -ConnectionInfo $connection
+$sessionId = Start-SqlSizerSession -Database "MyDB" -ConnectionInfo $connection -DatabaseInfo $info
 
-```
-
-# Installation
-Run the following to install SqlSizer-MSSQL from the  [PowerShell Gallery](https://www.powershellgallery.com/packages/SqlSizer-MSSQL).
-
-To install for all users, remove the -Scope parameter and run in an elevated session:
-
-```powershell
-Install-Module SqlSizer-MSSQL -Scope CurrentUser
-```
-
-Before running scripts:
-
-```powershell
-Import-Module SqlSizer-MSSQL
-```
-
-# Examples
-Please take a look at examples in *Examples* folder.
-
-## Sample 1 (on-premises SQL server)
-```powershell
-$server = "localhost"
-$database = "AdventureWorks2019"
-$username = "someuser"
-$password = ConvertTo-SecureString -String "pass" -AsPlainText -Force
-
-# Create connection
-$connection = New-SqlConnectionInfo -Server $server -Username $username -Password $password
-
-# Get database info
-$info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
-
-# Start session
-$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
-
-# Define start set
-# Query 1: 10 persons with first name = 'John'
-$query = New-Object -TypeName Query
-$query.Color = [Color]::Yellow
-$query.Schema = "Person"
-$query.Table = "Person"
-$query.KeyColumns = @('BusinessEntityID')
-$query.Where = "[`$table].FirstName = 'John'"
-$query.Top = 10
-$query.OrderBy = "[`$table].LastName ASC"
-
-# Init start set
-Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
-
-# Find subset
-Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
-
-# Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
-
-# Create a new db with found subset of data
-$newDatabase = "AdventureWorks2019_subset_John"
-Copy-Database -Database $database -NewDatabase $newDatabase -ConnectionInfo $connection
-$infoNew = Get-DatabaseInfo -Database $newDatabase -ConnectionInfo $connection
-
-Disable-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Disable-AllTablesTriggers -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Clear-Database -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Copy-DataFromSubset -Source $database -Destination $newDatabase -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
-Enable-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Enable-AllTablesTriggers -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Format-Indexes -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-Compress-Database -Database $newDatabase -ConnectionInfo $connection
-Test-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $infoNew
-
-$infoNew = Get-DatabaseInfo -Database $newDatabase -ConnectionInfo $connection -MeasureSize $true
-
-Write-Verbose "Subset size: $($infoNew.DatabaseSize)"
-$sum = 0
-foreach ($table in $infoNew.Tables)
-{
-    $sum += $table.Statistics.Rows
-}
-
-Write-Verbose "Logical reads from db during subsetting: $($connection.Statistics.LogicalReads)"
-Write-Verbose "Total rows: $($sum)"
-Write-Verbose "==================="
-
-Clear-SqlSizerSession -SessionId $sessionId -Database $database -ConnectionInfo $connection -DatabaseInfo $info
-
-# end of script
-```
-## Sample 2 (Azure SQL database)
-
-```powershell
-
-## Example that shows how to a subset database in Azure
-
-# Connection settings
-$server = "sqlsizer.database.windows.net"
-$database = "##db##"
-
-Connect-AzAccount
-$accessToken = (Get-AzAccessToken -ResourceUrl https://database.windows.net).Token
-
-# Create connection
-$connection = New-SqlConnectionInfo -Server $server -AccessToken $accessToken
-
-# Get database info
-$info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
-
-# Start session
-$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
-
-# Define start set
-
-# Query 1: 10 top customers
-$query = New-Object -TypeName Query
-$query.Color = [Color]::Yellow
-$query.Schema = "SalesLT"
+# 2. Define seed records
+$query = New-Object -TypeName Query2
+$query.State = [TraversalState]::Include
+$query.Schema = "Sales"
 $query.Table = "Customer"
 $query.KeyColumns = @('CustomerID')
 $query.Top = 10
 
-# Init start set
-Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
+# 3. Find subset
+Initialize-StartSet -Database "MyDB" -Queries @($query) -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection
+Find-Subset -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection
 
-# Find subset
-Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
+# 4. View results
+Get-SubsetTables -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection | Format-Table
 
-# Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+# 5. Cleanup
+Clear-SqlSizerSession -Database "MyDB" -SessionId $sessionId -ConnectionInfo $connection
 ```
 
-## Schema visualizations
+**[See How It Works →](docs/HOW-IT-WORKS.md)** for complete algorithm details, traversal states, and advanced examples.
 
-Demo01:
-https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo01/
+## Installation
 
-Demo02:
-https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo02/
+```powershell
+# Prerequisites
+Install-Module sqlserver -Scope CurrentUser
+Install-Module dbatools -Scope CurrentUser
+Install-Module Az -Scope CurrentUser  # For Azure
 
-Demo03:
-https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo03/
+# Install SqlSizer
+Install-Module SqlSizer-MSSQL -Scope CurrentUser
+
+# Import before use
+Import-Module SqlSizer-MSSQL
+```
+
+## Examples
+
+See the [Examples/](Examples/) directory for complete working scripts:
+
+| Scenario | Location |
+|----------|----------|
+| Basic subset | [Examples/AdventureWorks2019/Subset/](Examples/AdventureWorks2019/Subset/) |
+| Data removal | [Examples/AdventureWorks2019/Removal/](Examples/AdventureWorks2019/Removal/) |
+| Azure SQL | [Examples/Azure/AzureSQL/](Examples/Azure/AzureSQL/) |
+
+## Schema Visualizations
+
+- [Demo01](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo01/)
+- [Demo02](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo02/)
+- [Demo03](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo03/)
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| **[How It Works](docs/HOW-IT-WORKS.md)** | Algorithm, traversal states, data structures, troubleshooting |
 
 ## License
+
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fsqlsizer%2Fsqlsizer-mssql.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fsqlsizer%2Fsqlsizer-mssql?ref=badge_large)
 
