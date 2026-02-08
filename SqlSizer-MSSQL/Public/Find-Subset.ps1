@@ -423,26 +423,47 @@ WHERE [Table] = $($Operation.TableId)
         }
         else
         {
-            # Process in batches
+            # Process in batches - must separate SELECT and UPDATE since SQL Server
+            # doesn't allow mixing column updates with variable assignment in SET clause
             $query = @"
 DECLARE @Remaining INT = $MaxBatchSize;
+DECLARE @ProcessThisRow INT;
 
-UPDATE SqlSizer.Operations
-SET Status = 0,
-    Processed = CASE
-        WHEN (ToProcess - Processed) <= @Remaining THEN ToProcess
-        ELSE Processed + @Remaining
-    END,
-    @Remaining = @Remaining - CASE
-        WHEN (ToProcess - Processed) <= @Remaining THEN (ToProcess - Processed)
-        ELSE @Remaining
-    END
-WHERE [Table] = $($Operation.TableId)
-    AND Color = $state
-    AND Depth = $($Operation.Depth)
-    AND Status IS NULL
-    AND SessionId = '$SessionId'
-    AND @Remaining > 0
+WHILE @Remaining > 0
+BEGIN
+    -- Calculate how much to process from the next available row
+    SELECT TOP 1 @ProcessThisRow = 
+        CASE WHEN (ToProcess - Processed) <= @Remaining 
+             THEN (ToProcess - Processed) 
+             ELSE @Remaining 
+        END
+    FROM SqlSizer.Operations
+    WHERE [Table] = $($Operation.TableId)
+        AND Color = $state
+        AND Depth = $($Operation.Depth)
+        AND Status IS NULL
+        AND SessionId = '$SessionId'
+        AND (ToProcess - Processed) > 0;
+    
+    IF @ProcessThisRow IS NULL OR @ProcessThisRow = 0
+        BREAK;
+    
+    -- Update exactly one row
+    UPDATE TOP (1) SqlSizer.Operations
+    SET Status = 0,
+        Processed = Processed + @ProcessThisRow
+    WHERE [Table] = $($Operation.TableId)
+        AND Color = $state
+        AND Depth = $($Operation.Depth)
+        AND Status IS NULL
+        AND SessionId = '$SessionId'
+        AND (ToProcess - Processed) > 0;
+    
+    IF @@ROWCOUNT = 0
+        BREAK;
+    
+    SET @Remaining = @Remaining - @ProcessThisRow;
+END
 "@
         }
 

@@ -846,18 +846,19 @@ Describe 'Algorithm Options' {
     
     Context 'MaxBatchSize' {
         It 'Should complete with MaxBatchSize chunking' {
-            $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 10
+            # Use a small number of products that will exist in all data sizes
+            $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 3
             
             $testResult = Invoke-FindSubsetTest `
                 -Database $script:TestDatabase `
                 -ConnectionInfo $script:Connection `
                 -DatabaseInfo $script:DbInfo `
                 -Queries @($query) `
-                -MaxBatchSize 5
+                -MaxBatchSize 2
             
             $testResult.Success | Should -Be $true
             $testResult.Result.Finished | Should -Be $true
-            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products' -MinRows 10
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products' -MinRows 3
         }
     }
 }

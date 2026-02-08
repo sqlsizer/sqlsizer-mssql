@@ -682,34 +682,31 @@ UPDATE dbo.Employees SET ManagerId = NULL, HiredById = NULL, DeptId = NULL;
 "@
     try { Invoke-SqlcmdEx -Sql $breakCircular -Database $Database -ConnectionInfo $ConnectionInfo } catch {}
     
-    foreach ($table in $deleteOrder) {
+    # Helper function to delete and conditionally reseed
+    # IMPORTANT: On empty tables, DBCC CHECKIDENT RESEED 0 causes first insert to get ID 0, not 1!
+    # Only reseed when we actually deleted rows to avoid this issue on fresh databases.
+    function Clear-TableWithReseed {
+        param($TableName, $Database, $ConnectionInfo)
         try {
-            Invoke-SqlcmdEx -Sql "DELETE FROM dbo.$table" -Database $Database -ConnectionInfo $ConnectionInfo
+            $result = Invoke-SqlcmdEx -Sql "DELETE FROM dbo.$TableName; SELECT @@ROWCOUNT AS DeletedCount" -Database $Database -ConnectionInfo $ConnectionInfo
+            if ($null -ne $result -and $result.DeletedCount -gt 0) {
+                # Only reseed if we actually deleted data - this ensures IDs start at 1
+                Invoke-SqlcmdEx -Sql "DBCC CHECKIDENT ('dbo.$TableName', RESEED, 0)" -Database $Database -ConnectionInfo $ConnectionInfo
+            }
         }
         catch {
             # Ignore errors for tables that may not exist
         }
     }
+
+    foreach ($table in $deleteOrder) {
+        Clear-TableWithReseed -TableName $table -Database $Database -ConnectionInfo $ConnectionInfo
+    }
     
     # Delete remaining tables (order matters: Suppliers references Contacts)
     $remainingTables = @('Tags', 'Suppliers', 'Contacts', 'Departments', 'Employees', 'Categories')
     foreach ($table in $remainingTables) {
-        try {
-            Invoke-SqlcmdEx -Sql "DELETE FROM dbo.$table" -Database $Database -ConnectionInfo $ConnectionInfo
-        }
-        catch {}
-    }
-    
-    # Reseed identity columns so IDs start from 1 again
-    # This is required because Invoke-DataSeeding assumes IDs start from 1
-    $allTables = $deleteOrder + $remainingTables
-    foreach ($table in $allTables) {
-        try {
-            Invoke-SqlcmdEx -Sql "DBCC CHECKIDENT ('dbo.$table', RESEED, 0)" -Database $Database -ConnectionInfo $ConnectionInfo
-        }
-        catch {
-            # Ignore errors for tables that may not exist or don't have identity columns
-        }
+        Clear-TableWithReseed -TableName $table -Database $Database -ConnectionInfo $ConnectionInfo
     }
 }
 
