@@ -19,11 +19,6 @@ function Disable-TableTrigger
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Disabling trigger on table $SchemaName.$TableName" -PercentComplete 0
 
     $sql = "DISABLE TRIGGER $SchemaName.$TriggerName ON $SchemaName.$TableName"

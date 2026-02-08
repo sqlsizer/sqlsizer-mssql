@@ -1,7 +1,7 @@
 ![logo](https://avatars.githubusercontent.com/u/96390582?s=100&v=4)
 # sqlsizer-mssql
 
-A PowerShell module for extracting referentially-consistent data subsets from SQL Server, Azure SQL, and Azure Synapse.
+A PowerShell module for extracting referentially-consistent data subsets from SQL Server and Azure SQL.
 
 ## 🆕 Version 2.0.1 (February 2026)
 

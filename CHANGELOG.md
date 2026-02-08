@@ -75,7 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Foreign key management in SqlSizer.Operations
 - Multiple query/source support
 - Concurrent subsetting capability
-- Azure Synapse SQL Pool support (limited)
 - DFS (Depth-First Search) algorithm option
 - Interactive search modes
 - JSON/CSV import/export capabilities

@@ -32,14 +32,7 @@ function Install-SqlSizerCore
         Drop Table SqlSizer.ForeignKeys"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        $pk = "PRIMARY KEY NONCLUSTERED NOT ENFORCED"
-    }
-    else
-    {
-        $pk = "PRIMARY KEY"
-    }
+    $pk = "PRIMARY KEY"
     $tmp = "IF OBJECT_ID('SqlSizer.Settings') IS NULL
             BEGIN
                 CREATE TABLE SqlSizer.Settings(Id int identity(1,1) $pk, Name varchar(128), Value varchar(256))
@@ -51,14 +44,7 @@ function Install-SqlSizerCore
             END"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        $tmp = "CREATE TABLE SqlSizer.Files(Id int identity(1,1) $pk, FileId uniqueidentifier, [Index] int, [Content] nvarchar(4000))"
-    }
-    else
-    {
-        $tmp = "CREATE TABLE SqlSizer.Files(Id int identity(1,1) $pk, FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
-    }
+    $tmp = "CREATE TABLE SqlSizer.Files(Id int identity(1,1) $pk, FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     $tmp = "CREATE TABLE SqlSizer.Tables(Id int identity(1,1) $pk, [Schema] varchar(128), [TableName] varchar(128))"
@@ -111,33 +97,16 @@ function Install-SqlSizerCore
 
     if ((Test-TableExists -Database $Database -SchemaName "SqlSizerHistory" -TableName "Subset" -ConnectionInfo $ConnectionInfo) -eq $false)
     {
-        if ($ConnectionInfo.IsSynapse -eq $true)
-        {
-            $sql = "CREATE TABLE SqlSizerHistory.Subset ([Guid] [uniqueidentifier] NOT NULL $pk, [Name] varchar(256), [Created] datetime NULL)"
-        }
-        else
-        {
-            $sql = "CREATE TABLE SqlSizerHistory.Subset ([Id] int identity(1,1) $pk, [Guid] [uniqueidentifier] NOT NULL, [Name] varchar(256), [Created] datetime default(GETDATE()))"
-        }
+        $sql = "CREATE TABLE SqlSizerHistory.Subset ([Id] int identity(1,1) $pk, [Guid] [uniqueidentifier] NOT NULL, [Name] varchar(256), [Created] datetime default(GETDATE()))"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
 
     if ((Test-TableExists -Database $Database -SchemaName "SqlSizerHistory" -TableName "SubsetTable" -ConnectionInfo $ConnectionInfo) -eq $false)
     {
-        if ($ConnectionInfo.IsSynapse -eq $true)
-        {
-            $sql = "CREATE TABLE SqlSizerHistory.SubsetTable ([Guid] [uniqueidentifier] $pk, [SchemaName] varchar(256), [TableName] varchar(256), [PrimaryKeySize] int NOT NULL, [RowCount] int NOT NULL, [SubsetGuid] uniqueidentifier NOT NULL)"
-        }
-        else
-        {
-            $sql = "CREATE TABLE SqlSizerHistory.SubsetTable ([Id] int identity(1,1) $pk, [SchemaName] varchar(256), [TableName] varchar(256), [PrimaryKeySize] int NOT NULL, [RowCount] int NOT NULL,  [SubsetId] int NOT NULL)"
-        }
+        $sql = "CREATE TABLE SqlSizerHistory.SubsetTable ([Id] int identity(1,1) $pk, [SchemaName] varchar(256), [TableName] varchar(256), [PrimaryKeySize] int NOT NULL, [RowCount] int NOT NULL,  [SubsetId] int NOT NULL)"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
-        if ($ConnectionInfo.IsSynapse -eq $false)
-        {
-            $sql = "ALTER TABLE SqlSizerHistory.SubsetTable ADD CONSTRAINT SubsetTable_SubsetId FOREIGN KEY (SubsetId) REFERENCES SqlSizerHistory.Subset([Id]) ON DELETE CASCADE"
-            $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
-        }
+        $sql = "ALTER TABLE SqlSizerHistory.SubsetTable ADD CONSTRAINT SubsetTable_SubsetId FOREIGN KEY (SubsetId) REFERENCES SqlSizerHistory.Subset([Id]) ON DELETE CASCADE"
+        $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
 }

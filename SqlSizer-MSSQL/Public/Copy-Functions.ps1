@@ -13,11 +13,6 @@ function Copy-Functions
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Copy functions" -PercentComplete 0
 
     $sql = "select r.ROUTINE_SCHEMA as [schema], r.ROUTINE_DEFINITION as definition from [INFORMATION_SCHEMA].[ROUTINES] r WHERE r.ROUTINE_DEFINITION IS NOT NULL AND r.ROUTINE_TYPE ='FUNCTION'"

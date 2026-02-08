@@ -44,7 +44,6 @@ BeforeAll {
     $script:Connection.Server = $Server
     $script:Connection.EncryptConnection = $false
     $script:Connection.Statistics = New-Object SqlConnectionStatistics
-    $script:Connection.IsSynapse = $false
     
     # Calculate row counts
     $script:RowCounts = Get-ScaledRowCounts -DataSize $DataSize -CustomRowCount $CustomRowCount

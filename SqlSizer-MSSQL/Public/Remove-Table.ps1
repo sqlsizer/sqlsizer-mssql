@@ -127,26 +127,12 @@ function Remove-Table
     $table = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $SchemaName) -and ($_.TableName -eq $TableName) }
     foreach ($view in $table.Views)
     {
-        if ($ConnectionInfo.IsSynapse -eq $true)
-        {
-            $sql = "DROP VIEW  [$($view.SchemaName)].[$($view.ViewName)]"
-        }
-        else
-        {
-            $sql = "DROP VIEW IF EXISTS [$($view.SchemaName)].[$($view.ViewName)]"
-        }
+        $sql = "DROP VIEW IF EXISTS [$($view.SchemaName)].[$($view.ViewName)]"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
 
     # drop table
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        $sql = "DROP TABLE [$($SchemaName)].[$($TableName)]"
-    }
-    else
-    {
-        $sql = "DROP TABLE IF EXISTS [$($SchemaName)].[$($TableName)]"
-    }
+    $sql = "DROP TABLE IF EXISTS [$($SchemaName)].[$($TableName)]"
     $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     return $true

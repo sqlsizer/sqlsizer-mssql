@@ -16,25 +16,12 @@ function Get-DatabaseInfo
 
     function GetViewsRows
     {
-        if ($ConnectionInfo.IsSynapse)
-        {
-            $sql = "SELECT
-					SCHEMA_NAME(v.schema_id) as [schema],
-					OBJECT_NAME(v.object_id) as [view],
-					m.definition as [definition]
-                FROM
-					sys.views v
-				    INNER JOIN sys.sql_modules m ON v.object_id = m.object_id"
-        }
-        else
-        {
-            $sql = "SELECT
+        $sql = "SELECT
                 SCHEMA_NAME(v.schema_id) as [schema],
                 OBJECT_NAME(v.object_id) as [view],
                 OBJECT_DEFINITION(v.object_id) as [definition]
                 FROM
             sys.views v"
-        }
 
         try
         {
@@ -143,12 +130,6 @@ function Get-DatabaseInfo
 
     function GetForeignKeysInfo
     {
-        if ($ConnectionInfo.IsSynapse)
-        {
-
-            return $null
-        }
-
         $sql = "SELECT
         [objects].name AS [fk_name],
         [schemas].name AS [fk_schema],
@@ -218,11 +199,6 @@ function Get-DatabaseInfo
 
     function GetViewAndTableDependenciesInfo
     {
-        if ($ConnectionInfo.IsSynapse)
-        {
-            return $null
-        }
-
         $sql = "WITH Dependencies ([referenced_type], [referenced_id], [referenced_schema_name],[referenced_entity_name], [referencing_type], [referencing_id], [view_schema_name], [view_name])
         AS
         (
@@ -259,11 +235,6 @@ function Get-DatabaseInfo
 
     function GetTriggerInfo
     {
-        if ($ConnectionInfo.IsSynapse)
-        {
-            return $null
-        }
-
         $sql = "SELECT
         trig.[Name] as [TriggerName],
         s.name as [SchemaName],
@@ -293,14 +264,7 @@ function Get-DatabaseInfo
 
     function GetStoredProceduresRows
     {
-        if ($ConnectionInfo.IsSynapse)
-        {
-            $sql = "select schema_name(o.schema_id) AS [schema], o.name, s.definition as [definition] from sys.objects o inner join sys.sql_modules s ON s.object_id = o.object_id where type = 'P'"
-        }
-        else
-        {
-            $sql = "select SCHEMA_NAME(schema_id) AS [schema], name, object_definition(object_id) as [definition] from sys.objects where type = 'P'"
-        }
+        $sql = "select SCHEMA_NAME(schema_id) AS [schema], name, object_definition(object_id) as [definition] from sys.objects where type = 'P'"
 
         try
         {
@@ -400,14 +364,6 @@ function Get-DatabaseInfo
                 $null = $table.PrimaryKey.Add($pkColumn)
             }
         }
-            if ($true -eq $ConnectionInfo.IsSynapse)
-            {
-                if (($null -ne $AdditonalStructureInfo) -and ($null -eq $table.PrimaryKey))
-                {
-                    $sTable = $AdditonalStructureInfo.Tables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
-                    $table.PrimaryKey = $sTable.PrimaryKey
-                }
-            }
 
         $tableColumns = $columnsInfo[$key]
 
@@ -462,19 +418,7 @@ function Get-DatabaseInfo
                 $null = $table.ForeignKeys.Add($fk)
             }
         }
-        else
-        {
-            if ($true -eq $ConnectionInfo.IsSynapse)
-            {
-                if ($null -ne $AdditonalStructureInfo)
-                {
-                    foreach ($item in $AdditonalStructureInfo.Fks | Where-Object { ($_.FkSchema -eq $table.SchemaName) -and ($_.FkTable -eq $table.TableName) })
-                    {
-                        $null = $table.ForeignKeys.Add($item)
-                    }
-                }
-            }
-        }
+
         if ($null -ne $indexInfo)
         {
             $indexesForTable = $indexInfo[$key]

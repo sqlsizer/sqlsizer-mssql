@@ -309,20 +309,11 @@ VALUES
         # Execute all queries
         if ($queries.Count -gt 0)
         {
-            if ($ConnectionInfo.IsSynapse)
+            # Execute queries individually with GO
+            foreach ($query in $queries)
             {
-                # Synapse: Execute queries with proper GO separators
-                $combinedQuery = "DECLARE @SqlSizerCount INT = 0`n`n" + ($queries -join "`n`n")
-                $null = Invoke-SqlcmdEx -Sql $combinedQuery -Database $Database -ConnectionInfo $ConnectionInfo
-            }
-            else
-            {
-                # Regular SQL Server: Execute queries individually with GO
-                foreach ($query in $queries)
-                {
-                    $wrappedQuery = $query + "`nGO`n"
-                    $null = Invoke-SqlcmdEx -Sql $wrappedQuery -Database $Database -ConnectionInfo $ConnectionInfo
-                }
+                $wrappedQuery = $query + "`nGO`n"
+                $null = Invoke-SqlcmdEx -Sql $wrappedQuery -Database $Database -ConnectionInfo $ConnectionInfo
             }
         }
     }

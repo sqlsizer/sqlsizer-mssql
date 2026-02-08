@@ -13,11 +13,6 @@ function `Copy-Database
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     # Convert '.' to 'localhost' for dbatools compatibility
     $serverName = if ($ConnectionInfo.Server -eq '.') { 'localhost' } else { $ConnectionInfo.Server }
 

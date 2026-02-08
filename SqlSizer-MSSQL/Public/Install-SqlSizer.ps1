@@ -163,11 +163,5 @@ function Install-SqlSizer
 
     Install-SqlSizerCore -Database $Database -DatabaseInfo $DatabaseInfo -ConnectionInfo $ConnectionInfo
 
-    # install JSON helper for Synapse
-    if ($ConnectionInfo.IsSynapse)
-    {
-        CreateJsonFactory
-    }
-
     Update-DatabaseInfo -DatabaseInfo $DatabaseInfo -Database $Database -ConnectionInfo $ConnectionInfo
 }

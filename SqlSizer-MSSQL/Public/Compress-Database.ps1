@@ -10,11 +10,6 @@ function Compress-Database
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Shrinking database" -PercentComplete 0
 
     $sql = "DBCC SHRINKDATABASE ([" + ($Database) + "])"

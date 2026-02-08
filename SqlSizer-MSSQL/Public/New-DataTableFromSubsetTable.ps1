@@ -40,17 +40,7 @@ function New-DataTableFromSubsetTable
     {
         if (($table.SchemaName -eq $SchemaName) -and ($table.TableName -eq $TableName))
         {
-            if ($ConnectionInfo.IsSynapse -eq $true)
-            {
-                $guid = New-Guid
-                $guidString = $guid.ToString().Replace("-", "")
-
-                $sql = "ALTER TABLE [$NewSchemaName].[$NewTableName] ADD CONSTRAINT PK_$guidString PRIMARY KEY NONCLUSTERED ($([string]::Join(',', $table.PrimaryKey))) NOT ENFORCED"
-            }
-            else
-            {
-                $sql = "ALTER TABLE [$NewSchemaName].[$NewTableName] ADD PRIMARY KEY ($([string]::Join(',', $table.PrimaryKey)))"
-            }
+            $sql = "ALTER TABLE [$NewSchemaName].[$NewTableName] ADD PRIMARY KEY ($([string]::Join(',', $table.PrimaryKey)))"
             $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
         }
     }

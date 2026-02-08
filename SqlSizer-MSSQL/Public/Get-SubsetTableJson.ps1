@@ -35,14 +35,7 @@ function Get-SubsetTableJson
     {
         if (($table.SchemaName -eq $SchemaName) -and ($table.TableName -eq $TableName))
         {
-            if ($ConnectionInfo.IsSynapse -eq $true)
-            {
-                $sql = "EXEC SqlSizer.CreateJSON @SchemaName = 'SqlSizer_$($SessionId)', @ViewName = '$($type)_$($SchemaName)_$($TableName)'"
-            }
-            else
-            {
-                $sql = "SELECT * FROM SqlSizer_$($SessionId).$($type)_$($SchemaName)_$($TableName) FOR JSON PATH, INCLUDE_NULL_VALUES"
-            }
+            $sql = "SELECT * FROM SqlSizer_$($SessionId).$($type)_$($SchemaName)_$($TableName) FOR JSON PATH, INCLUDE_NULL_VALUES"
 
             $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
             $json = ($rows | Select-Object ItemArray -ExpandProperty ItemArray) -join ""

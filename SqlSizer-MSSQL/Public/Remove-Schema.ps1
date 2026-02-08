@@ -43,14 +43,7 @@ function Remove-Schema
     {
         if ($view.SchemaName -eq $SchemaName)
         {
-            if ($true -eq $ConnectionInfo.IsSynapse)
-            {
-                $sql = "DROP VIEW [$($view.SchemaName)].[$($view.ViewName)]"
-            }
-            else
-            {
-                $sql = "DROP VIEW IF EXISTS [$($view.SchemaName)].[$($view.ViewName)]"   
-            }
+            $sql = "DROP VIEW IF EXISTS [$($view.SchemaName)].[$($view.ViewName)]"   
             $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
         }
     }
@@ -68,14 +61,7 @@ function Remove-Schema
     # drop schema
     if ($null -eq $KeepTables)
     {
-        if ($true -eq $ConnectionInfo.IsSynapse)
-        {
-            $sql = "DROP SCHEMA $SchemaName"    
-        }
-        else 
-        {
-            $sql = "DROP SCHEMA IF EXISTS $SchemaName"    
-        }
+        $sql = "DROP SCHEMA IF EXISTS $SchemaName"    
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
 }

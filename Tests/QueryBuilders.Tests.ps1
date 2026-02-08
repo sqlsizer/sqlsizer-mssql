@@ -245,8 +245,7 @@ Describe 'New-ExcludePendingQuery' {
     It 'Updates Pending to Exclude' {
         $result = New-ExcludePendingQuery `
             -ProcessingTable 'SqlSizer.Processing_Orders' `
-            -TableInfo $mockTableInfo `
-            -IsSynapse $false
+            -TableInfo $mockTableInfo
 
         # Pending state = 3, Exclude state = 2
         $result | Should -Match 'SET Color = 2'
@@ -256,35 +255,23 @@ Describe 'New-ExcludePendingQuery' {
     It 'Uses correct processing table' {
         $result = New-ExcludePendingQuery `
             -ProcessingTable 'SqlSizer.Custom_Table' `
-            -TableInfo $mockTableInfo `
-            -IsSynapse $false
+            -TableInfo $mockTableInfo
 
         $result | Should -Match 'UPDATE SqlSizer\.Custom_Table'
     }
 
-    It 'Includes GO for non-Synapse' {
+    It 'Includes GO statement' {
         $result = New-ExcludePendingQuery `
             -ProcessingTable 'SqlSizer.Processing_Orders' `
-            -TableInfo $mockTableInfo `
-            -IsSynapse $false
+            -TableInfo $mockTableInfo
 
         $result | Should -Match 'GO'
-    }
-
-    It 'Omits GO for Synapse' {
-        $result = New-ExcludePendingQuery `
-            -ProcessingTable 'SqlSizer.Processing_Orders' `
-            -TableInfo $mockTableInfo `
-            -IsSynapse $true
-
-        $result | Should -Not -Match '\nGO\n'
     }
 
     It 'Includes descriptive comment' {
         $result = New-ExcludePendingQuery `
             -ProcessingTable 'SqlSizer.Processing_Orders' `
-            -TableInfo $mockTableInfo `
-            -IsSynapse $false
+            -TableInfo $mockTableInfo
 
         $result | Should -Match '-- Mark remaining Pending as Exclude'
         $result | Should -Match 'dbo\.Orders'
@@ -368,8 +355,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match 'WITH SourceRecords AS'
         $result | Should -Match 'NewRecords AS'
@@ -391,8 +377,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target'
     }
@@ -413,8 +398,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match 'INSERT INTO SqlSizer\.Operations'
     }
@@ -435,8 +419,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match 'FK_Orders_Customers'
     }
@@ -457,8 +440,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match '-- Traverse OUTGOING FK'
     }
@@ -479,32 +461,9 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -Iteration 5 `
             -SessionId 'TEST-SESSION' `
             -MaxBatchSize -1 `
-            -FullSearch $false `
-            -IsSynapse $false
+            -FullSearch $false
 
         $result | Should -Match '-- Traverse INCOMING FK'
-    }
-
-    It 'Omits GO for Synapse' {
-        $result = New-CTETraversalQuery `
-            -SourceProcessing 'SqlSizer.Proc_Source' `
-            -TargetProcessing 'SqlSizer.Proc_Target' `
-            -SourceTable $mockSourceTable `
-            -TargetTable $mockTargetTable `
-            -Fk $mockFk `
-            -Direction ([TraversalDirection]::Outgoing) `
-            -NewState ([TraversalState]::Include) `
-            -SourceTableId 1 `
-            -TargetTableId 2 `
-            -FkId 10 `
-            -Constraints @{} `
-            -Iteration 5 `
-            -SessionId 'TEST-SESSION' `
-            -MaxBatchSize -1 `
-            -FullSearch $true `
-            -IsSynapse $true
-
-        $result | Should -Not -Match '\nGO\n'
     }
 
     Context 'Dynamic Key Column Generation' {
@@ -524,8 +483,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # Should have Key0 in SourceRecords
             $result | Should -Match 'SELECT Key0, Depth, Fk'
@@ -549,8 +507,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # For outgoing, source columns = PK (3 columns), target columns = FK columns (2 columns)
             # SourceRecords should have Key0, Key1, Key2
@@ -573,8 +530,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # INSERT should only list Key0 (since FK has 1 column)
             $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Color, Source, Depth, Fk, Iteration\)'
@@ -596,8 +552,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # For outgoing: target columns = FK columns (2 columns)
             # INSERT should list Key0, Key1
@@ -620,8 +575,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # Should NOT have the old hardcoded 8-column pattern
             $result | Should -Not -Match 'Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Depth, Fk'
@@ -643,8 +597,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -Iteration 5 `
                 -SessionId 'TEST-SESSION' `
                 -MaxBatchSize -1 `
-                -FullSearch $false `
-                -IsSynapse $false
+                -FullSearch $false
 
             # For incoming: source columns = FK columns (2), target columns = target PK (2)
             # SourceRecords should have Key0, Key1

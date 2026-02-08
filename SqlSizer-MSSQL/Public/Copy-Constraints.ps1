@@ -13,11 +13,6 @@ function Copy-Constraints
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Copy constraints" -PercentComplete 0
 
     $sql = "SELECT s.name as [schema], object_name(o.object_id) as constraintName, object_name(o.parent_object_id) as tableName, object_definition(o.object_id) as [definition]

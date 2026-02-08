@@ -892,7 +892,6 @@ finally {
 | Complex schemas (>100 tables) | Start with `FullSearch = $false`, expand if needed |
 | Slow performance | Check for missing indexes on FK columns |
 | Azure SQL | Connection already optimized for cloud |
-| Azure Synapse | Set `IsSynapse = $true` in connection info |
 | Memory pressure | Use DFS (`UseDfs = $true`) for lower memory footprint |
 
 ### Index Recommendations

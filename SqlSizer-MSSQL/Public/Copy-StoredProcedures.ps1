@@ -13,11 +13,6 @@ function Copy-StoredProcedures
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Copy stored procedures" -PercentComplete 0
 
     $sql = "SELECT s.name as [schema], object_definition(o.object_id) as [definition]

@@ -10,11 +10,6 @@ function Disable-DatabaseTriggers
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        throw "Feature not supported in Synapse"
-    }
-
     Write-Progress -Activity "Disabling all triggers on database $Database" -PercentComplete 0
 
     $sql = "DISABLE TRIGGER ALL ON DATABASE"

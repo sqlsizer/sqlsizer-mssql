@@ -27,15 +27,6 @@ function Install-SqlSizerSecureViews
 
     $structure = [Structure]::new($DatabaseInfo)
 
-    if ($ConnectionInfo.IsSynapse)
-    {
-        $max = 4000
-    }
-    else
-    {
-        $max = $null
-    }
-
     $total = [System.Collections.Generic.List[string]]@()
     foreach ($table in $DatabaseInfo.Tables)
     {
@@ -45,8 +36,8 @@ function Install-SqlSizerSecureViews
         }
 
 
-        $tableSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $true -SkipGenerated $false -MaxLength $max
-        $hashSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $false -Array $true -SkipGenerated $false -MaxLength $max
+        $tableSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $true -SkipGenerated $false -MaxLength $null
+        $hashSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $false -Array $true -SkipGenerated $false -MaxLength $null
         $join = GetSecureViewsTableJoin -TableInfo $table -Structure $structure
 
         if ($null -eq $join)

@@ -48,7 +48,7 @@ function Invoke-SqlcmdEx
             $params.Credential = $ConnectionInfo.Credential
         }
 
-        if (($true -eq $Statistics) -and ($ConnectionInfo.IsSynapse -eq $false))
+        if ($true -eq $Statistics)
         {
             $params.Query = 'SET STATISTICS IO ON
             ' + $Sql + '

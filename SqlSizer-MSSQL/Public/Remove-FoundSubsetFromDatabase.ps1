@@ -66,28 +66,19 @@ function Remove-FoundSubsetFromDatabase
 
         $where = GetWhere -Database $Database -TableInfo $table -DatabaseInfo $DatabaseInfo
 
+        $top = ""
 
-        if ($ConnectionInfo.IsSynapse -eq $true)
+        if ($Step -ne $null)
         {
-            $sql = "DELETE t FROM " + $schema + ".[" + $tableName + "] t " + $where
-            $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
+            $top = " TOP ($Step) "
         }
-        else
+
+        do
         {
-            $top = ""
-
-            if ($Step -ne $null)
-            {
-                $top = " TOP ($Step) "
-            }
-
-            do
-            {
-                $sql = "DELETE $top t FROM " + $schema + ".[" + $tableName + "] t " + $where + " SELECT @@ROWCOUNT as Removed"
-                $result = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-            }
-            while ($result.Removed -gt 0)
+            $sql = "DELETE $top t FROM " + $schema + ".[" + $tableName + "] t " + $where + " SELECT @@ROWCOUNT as Removed"
+            $result = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
         }
+        while ($result.Removed -gt 0)
     }
 
     Write-Progress -Activity "Removing subset $SessionId" -Completed

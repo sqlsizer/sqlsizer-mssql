@@ -19,57 +19,6 @@ function Save-Subset
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        $guid = (New-Guid).ToString()
-
-        $sql = "INSERT INTO SqlSizerHistory.Subset([Guid], [Name]) VALUES('$guid', '$SubsetName')"
-        $result = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-        $subsetId = $result.Id
-
-        $tables = Get-SubsetTables -Database $Database -DatabaseInfo $DatabaseInfo -ConnectionInfo $ConnectionInfo -SessionId $SessionId
-        foreach ($table in $tables)
-        {
-            $tableGuid = (New-Guid).ToString()
-            $sql = "INSERT INTO SqlSizerHistory.SubsetTable([Guid], [SchemaName], [TableName], [PrimaryKeySize], [RowCount], [SubsetGuid]) VALUES('$tableGuid', '$($table.SchemaName)', '$($table.TableName)', $($table.PrimaryKeySize), $($table.RowCount), '$guid')"
-            $result = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-            $tableId = $result.TableId
-
-            $exists = Test-TableExists -Database $Database -SchemaName "SqlSizerHistory" -TableName "SubsetTableRow_$($table.PrimaryKeySize)" -ConnectionInfo $ConnectionInfo
-
-            if ($exists -eq $false)
-            {
-                $keys = @()
-                for ($i = 0; $i -lt $table.PrimaryKeySize; $i++)
-                {
-                    $keys += "Key${i} varchar(4000) not null"
-                }
-
-                $keysStr = [string]::Join(',', $keys)
-
-                $sql = "CREATE TABLE SqlSizerHistory.SubsetTableRow_$($table.PrimaryKeySize) ([Guid] uniqueidentifier NOT NULL, $keysStr, [Hash] varbinary(8000), [TableGuid] uniqueidentifier NOT NULL)"
-                $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-            }
-
-            $tableInfo = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
-            $keys = @()
-            $columns = @()
-            $i = 0;
-            for ($i = 0; $i -lt $tableInfo.PrimaryKey.Count; $i++)
-            {
-                $keys += "Key$i"
-                $columns += $tableInfo.PrimaryKey[$i].Name
-            }
-
-            $sql = "INSERT INTO SqlSizerHistory.SubsetTableRow_$($table.PrimaryKeySize)([Guid], $([string]::Join(',', $keys)), TableGuid, [Hash])
-            SELECT NEWID(), $([string]::Join(',', $columns)), '$tableGuid', row_sha2_512
-            FROM [SqlSizer_$SessionId].Secure_$($tableInfo.SchemaName)_$($tableInfo.TableName)"
-
-            $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-        }
-        return $guid
-    }
-
     $guid = (New-Guid).ToString()
 
     $sql = "INSERT INTO SqlSizerHistory.Subset([Guid], [Name]) VALUES('$guid', '$SubsetName') SELECT SCOPE_IDENTITY() as Id"

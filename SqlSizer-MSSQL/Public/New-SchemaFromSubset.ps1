@@ -33,19 +33,16 @@ function New-SchemaFromSubset
     }
 
     # create foreign keys
-    if ($ConnectionInfo.IsSynapse -eq $false)
+    foreach ($table in $DatabaseInfo.Tables)
     {
-        foreach ($table in $DatabaseInfo.Tables)
-        {
-            $isSubsetTable = $subsetTables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
+        $isSubsetTable = $subsetTables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
 
-            if ($null -ne $isSubsetTable)
+        if ($null -ne $isSubsetTable)
+        {
+            foreach ($fk in $table.ForeignKeys)
             {
-                foreach ($fk in $table.ForeignKeys)
-                {
-                    $sql = "ALTER TABLE $($NewSchemaPrefix)_$($table.SchemaName).$($table.TableName) ADD CONSTRAINT $($fk.Name) FOREIGN KEY ($([string]::Join(',', $fk.FkColumns))) REFERENCES $($NewSchemaPrefix)_$($fk.Schema).$($fk.Table) ($([string]::Join(',', $fk.Columns)))"
-                    $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Silent $false
-                }
+                $sql = "ALTER TABLE $($NewSchemaPrefix)_$($table.SchemaName).$($table.TableName) ADD CONSTRAINT $($fk.Name) FOREIGN KEY ($([string]::Join(',', $fk.FkColumns))) REFERENCES $($NewSchemaPrefix)_$($fk.Schema).$($fk.Table) ($([string]::Join(',', $fk.Columns)))"
+                $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Silent $false
             }
         }
     }

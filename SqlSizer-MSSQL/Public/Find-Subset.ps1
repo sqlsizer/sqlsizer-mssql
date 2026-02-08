@@ -164,8 +164,7 @@ function Find-Subset
                     -Iteration $Iteration `
                     -SessionId $SessionId `
                     -MaxBatchSize $MaxBatchSize `
-                    -FullSearch $FullSearch `
-                    -IsSynapse $ConnectionInfo.IsSynapse
+                    -FullSearch $FullSearch
 
                 $queryList.Add($query)
             }
@@ -311,10 +310,7 @@ SET @ExcludedCount = @@ROWCOUNT;
 SELECT @ExcludedCount AS ExcludedCount;
 "@
 
-            if (-not $ConnectionInfo.IsSynapse)
-            {
-                $query += "`nGO`n"
-            }
+            $query += "`nGO`n"
 
             $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
             if ($null -ne $result -and $null -ne $result.ExcludedCount)

@@ -35,16 +35,7 @@ function Install-SqlSizerExportViews
             continue
         }
 
-        if ($ConnectionInfo.IsSynapse)
-        {
-            $max = 4000
-        }
-        else
-        {
-            $max = $null
-        }
-
-        $tableSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $true -SkipGenerated $true -MaxLength $max
+        $tableSelect = Get-TableSelect -TableInfo $table -Conversion $true -IgnoredTables $IgnoredTables -Prefix "t." -AddAs $true -SkipGenerated $true -MaxLength $null
         $join = GetExportViewsTableJoin -TableInfo $table -Structure $structure
 
         if ($null -eq $join)

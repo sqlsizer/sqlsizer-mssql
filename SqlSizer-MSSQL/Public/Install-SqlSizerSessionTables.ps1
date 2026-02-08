@@ -25,14 +25,7 @@ function Install-SqlSizerSessionTables
         $tmp = "CREATE SCHEMA SqlSizer_$SessionId"
         $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
-    if ($ConnectionInfo.IsSynapse -eq $true)
-    {
-        $pk = "PRIMARY KEY NONCLUSTERED NOT ENFORCED"
-    }
-    else
-    {
-        $pk = "PRIMARY KEY"
-    }
+    $pk = "PRIMARY KEY"
     $structure = [Structure]::new($DatabaseInfo)
 
     foreach ($signature in $structure.Signatures.Keys)
@@ -89,14 +82,7 @@ function Install-SqlSizerSessionTables
                 $sql = "CREATE NONCLUSTERED INDEX [Index] ON $($processing) ($($keysIndex), [Color] ASC)"
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     
-                if ($ConnectionInfo.IsSynapse -eq $true)
-                {
-                    $sql = "CREATE NONCLUSTERED INDEX [Index_2] ON $($processing) ([Iteration] ASC)"
-                }
-                else
-                {
-                    $sql = "CREATE NONCLUSTERED INDEX [Index_2] ON $($processing) ([Iteration]) INCLUDE ([Depth], [Fk])"
-                }
+                $sql = "CREATE NONCLUSTERED INDEX [Index_2] ON $($processing) ([Iteration]) INCLUDE ([Depth], [Fk])"
     
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
             }

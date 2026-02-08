@@ -63,10 +63,7 @@ function New-CTETraversalQuery
         [int]$MaxBatchSize,
         
         [Parameter(Mandatory = $true)]
-        [bool]$FullSearch,
-        
-        [Parameter(Mandatory = $true)]
-        [bool]$IsSynapse
+        [bool]$FullSearch
     )
 
     # Build column mappings based on direction
@@ -252,12 +249,9 @@ SELECT
 FROM @InsertedRows
 GROUP BY Depth;
 
-"@
+GO
 
-    if (-not $IsSynapse)
-    {
-        $query += "`nGO`n"
-    }
+"@
 
     return $query
 }
@@ -279,10 +273,7 @@ function New-ExcludePendingQuery
         [string]$ProcessingTable,
         
         [Parameter(Mandatory = $true)]
-        [TableInfo]$TableInfo,
-        
-        [Parameter(Mandatory = $true)]
-        [bool]$IsSynapse
+        [TableInfo]$TableInfo
     )
 
     $pendingState = [int][TraversalState]::Pending
@@ -293,12 +284,10 @@ function New-ExcludePendingQuery
 UPDATE $ProcessingTable
 SET Color = $excludeState
 WHERE Color = $pendingState;
-"@
 
-    if (-not $IsSynapse)
-    {
-        $query += "`nGO`n"
-    }
+GO
+
+"@
 
     return $query
 }
