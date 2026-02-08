@@ -7,6 +7,7 @@ A PowerShell module for extracting referentially-consistent data subsets from SQ
 
 - ✅ **`Find-Subset`** - 45% lower complexity, 50% less memory
 - ✅ **150+ unit tests** - Fast, database-free testing
+- ✅ **40+ integration tests** - Full FK traversal coverage
 - ✅ **Modular architecture** - 16 testable helper functions
 - 🐛 **Bug fixes** - Fixed data label swaps, undefined variables, type mismatches
 
@@ -86,6 +87,18 @@ See the [Examples/](Examples/) directory for complete working scripts:
 - [Demo01](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo01/)
 - [Demo02](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo02/)
 - [Demo03](https://sqlsizer.github.io/sqlsizer-mssql/Visualizations/Demo03/)
+
+## Testing
+
+```powershell
+# Unit tests (no database required)
+Invoke-Pester -Path .\Tests\ -Output Detailed
+
+# Integration tests (requires SQL Server)
+.\Tests\Run-IntegrationTests.ps1 -DataSize Tiny
+```
+
+See [Tests/README.md](Tests/README.md) for details.
 
 ## Documentation
 

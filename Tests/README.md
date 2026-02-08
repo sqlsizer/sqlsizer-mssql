@@ -1,18 +1,29 @@
 # SqlSizer-MSSQL Tests
 
-This directory contains unit tests for the SqlSizer-MSSQL module using Pester.
+This directory contains unit tests and integration tests for the SqlSizer-MSSQL module using Pester.
 
 ## Prerequisites
 
-Install Pester if you haven't already:
-
 ```powershell
+# Install Pester
 Install-Module -Name Pester -Force -SkipPublisherCheck
+
+# For integration tests: SQL Server instance (local or remote)
 ```
 
 ## Running Tests
 
-### Run all tests
+### Quick Start
+
+```powershell
+# Unit tests only (no database required)
+Invoke-Pester -Path .\Tests\ -Exclude *Integration*
+
+# Integration tests (requires SQL Server)
+.\Tests\Run-IntegrationTests.ps1 -DataSize Tiny
+```
+
+### Run all unit tests
 
 ```powershell
 # From the repository root
@@ -78,6 +89,59 @@ Invoke-Pester -Configuration $config
   - `New-GetIterationStatisticsQuery` - Statistics retrieval
   - `New-ExcludePendingQuery` - Pending exclusion (marks orphaned Pending as Exclude)
   - `New-CTETraversalQuery` - Main traversal CTE query (includes Pending→Include promotion)
+
+- **Find-Subset.Integration.Tests.ps1** - End-to-end tests against real database
+  - Basic FK traversal (single/multi-hop chains)
+  - Diamond patterns (multiple FK paths to same table)
+  - Self-referencing tables (hierarchies)
+  - Circular references (Employee ↔ Department)
+  - Deep chains (8-level FK chains)
+  - Composite keys (2 and 3 column PKs)
+  - Nullable FKs
+  - FullSearch mode (incoming FK handling)
+  - TraversalConfiguration (MaxDepth, Top, StateOverride)
+  - IgnoredTables
+  - BFS vs DFS comparison
+  - MaxBatchSize chunking
+  - Interactive mode
+  - Edge cases (empty results, orphan tables, high fanout)
+
+## Integration Tests
+
+### Running Integration Tests
+
+```powershell
+# Use wrapper script (handles module loading)
+.\Tests\Run-IntegrationTests.ps1 -DataSize Tiny
+
+# Data size presets
+.\Tests\Run-IntegrationTests.ps1 -DataSize Small   # ~2,000 rows
+.\Tests\Run-IntegrationTests.ps1 -DataSize Medium  # ~20,000 rows
+.\Tests\Run-IntegrationTests.ps1 -DataSize Large   # ~100,000 rows
+
+# Custom SQL Server instance
+.\Tests\Run-IntegrationTests.ps1 -Server "myserver\instance"
+
+# Skip database setup (reuse existing data)
+.\Tests\Run-IntegrationTests.ps1 -SkipDataSetup
+```
+
+### Test Database
+
+Integration tests create a `SqlSizerIntegrationTests` database with 32+ tables:
+
+| Pattern | Tables |
+|---------|--------|
+| Simple FK chains | Products → SubCategories → Categories |
+| Diamond pattern | Customers → Contacts (3 FK paths) |
+| Self-reference | Categories, Employees (manager hierarchy) |
+| Circular refs | Employees ↔ Departments |
+| Deep chains | DeepChainA through DeepChainH (8 levels) |
+| Composite keys | OrderDetails, ProductSuppliers, Inventory |
+| Many-to-many | ProductSuppliers, TeamMembers |
+| High fanout | HighFanoutParent → HighFanoutChildren |
+
+The database is retained after tests for inspection.
 
 ## Writing New Tests
 
