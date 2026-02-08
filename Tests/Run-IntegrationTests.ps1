@@ -14,6 +14,18 @@
     
 .PARAMETER SkipDataSetup
     Skip database initialization (use existing data)
+
+.PARAMETER Filter
+    Filter tests by name pattern (supports wildcards). Examples:
+    - "*FK*" - run tests containing "FK"
+    - "*Diamond*" - run diamond pattern tests
+    - "*End-to-End*" - run the full database creation test
+
+.EXAMPLE
+    .\Run-IntegrationTests.ps1 -Filter "*End-to-End*"
+    
+.EXAMPLE
+    .\Run-IntegrationTests.ps1 -DataSize Small -Filter "*Diamond*"
 #>
 param(
     [ValidateSet('Tiny', 'Small', 'Medium', 'Large', 'XLarge')]
@@ -21,7 +33,9 @@ param(
     
     [string]$Server = '.',
     
-    [switch]$SkipDataSetup
+    [switch]$SkipDataSetup,
+    
+    [string]$Filter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +43,14 @@ $ErrorActionPreference = 'Stop'
 # Get module path
 $modulePath = Split-Path -Parent $PSScriptRoot
 
-# Import module FIRST with Global scope - this loads the types globally
+# Import dbatools FIRST to avoid assembly conflict with SqlServer module
+# Both modules use Microsoft.Data.SqlClient but different versions
+if (-not (Get-Module -Name dbatools)) {
+    Write-Host "Loading dbatools module..." -ForegroundColor Cyan
+    Import-Module dbatools -ErrorAction SilentlyContinue
+}
+
+# Import SqlSizer module with Global scope - this loads the types globally
 Write-Host "Loading SqlSizer-MSSQL module..." -ForegroundColor Cyan
 Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Global
 
@@ -38,10 +59,22 @@ $env:SQLSIZER_TEST_DATASIZE = $DataSize
 $env:SQLSIZER_TEST_SERVER = $Server
 $env:SQLSIZER_TEST_SKIPDATASETUP = if ($SkipDataSetup) { '1' } else { '0' }
 
-Write-Host "Running integration tests with DataSize=$DataSize, Server=$Server" -ForegroundColor Cyan
+$filterMsg = if ($Filter) { ", Filter=$Filter" } else { "" }
+Write-Host "Running integration tests with DataSize=$DataSize, Server=$Server$filterMsg" -ForegroundColor Cyan
+
+# Build Pester parameters
+$pesterParams = @{
+    Path = "$PSScriptRoot\Find-Subset.Integration.Tests.ps1"
+    Output = 'Detailed'
+    PassThru = $true
+}
+
+if ($Filter) {
+    $pesterParams['FullNameFilter'] = $Filter
+}
 
 # Run Pester
-$result = Invoke-Pester -Path "$PSScriptRoot\Find-Subset.Integration.Tests.ps1" -Output Detailed -PassThru
+$result = Invoke-Pester @pesterParams
 
 # Clean up environment variables
 Remove-Item env:SQLSIZER_TEST_DATASIZE -ErrorAction SilentlyContinue

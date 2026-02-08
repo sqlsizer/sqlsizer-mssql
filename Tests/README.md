@@ -105,6 +105,11 @@ Invoke-Pester -Configuration $config
   - MaxBatchSize chunking
   - Interactive mode
   - Edge cases (empty results, orphan tables, high fanout)
+  - **End-to-End Database Subset Creation**
+    - Creates subset from complex multi-table queries
+    - Copies schema and data to new database
+    - Verifies ALL foreign key constraints are satisfied
+    - Drops test database on success
 
 ## Integration Tests
 
@@ -124,6 +129,11 @@ Invoke-Pester -Configuration $config
 
 # Skip database setup (reuse existing data)
 .\Tests\Run-IntegrationTests.ps1 -SkipDataSetup
+
+# Filter tests by name pattern (supports wildcards)
+.\Tests\Run-IntegrationTests.ps1 -Filter "*End-to-End*"
+.\Tests\Run-IntegrationTests.ps1 -Filter "*Diamond*"
+.\Tests\Run-IntegrationTests.ps1 -Filter "*self-ref*"
 ```
 
 ### Test Database

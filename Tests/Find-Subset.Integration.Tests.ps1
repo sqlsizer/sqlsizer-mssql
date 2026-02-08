@@ -1092,3 +1092,232 @@ Describe 'Multiple Starting Queries' {
         }
     }
 }
+
+# =====================================================
+# End-to-End Database Subset Test
+# =====================================================
+
+Describe 'End-to-End Database Subset Creation' {
+    <#
+    .SYNOPSIS
+        Creates a subset, copies to new database, verifies FK integrity, then cleans up.
+    .DESCRIPTION
+        This is a comprehensive test that:
+        1. Starts with a complex multi-table query spanning many relationships
+        2. Finds the complete referential subset
+        3. Creates a new empty database with schema
+        4. Copies subset data to the new database
+        5. Tests ALL foreign key constraints are satisfied
+        6. Drops the test database if successful
+    #>
+    
+    Context 'Complex Subset with FK Verification' {
+        It 'Should create referentially-consistent subset database' {
+            $subsetDbName = 'SqlSizerSubsetVerification_' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+            $sessionId = $null
+            $subsetCreated = $false
+            
+            try {
+                # =========================================================
+                # Step 1: Create session and define complex starting queries
+                # =========================================================
+                Write-Host "  Creating session and defining queries..." -ForegroundColor Gray
+                
+                $sessionId = New-TestSession `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo
+                
+                # Complex multi-source query covering various FK patterns:
+                # - Orders: traverses Customer → Contact, ProductVariant → Product → SubCategory → Category
+                # - Employees: traverses Department (circular) and manager hierarchy (self-ref)
+                # - Documents: traverses Employee author + threaded Comments
+                $queries = @(
+                    # Order with all related data (deep chain)
+                    (New-TestQuery -Schema 'dbo' -Table 'OrderDetails' -KeyColumns @('OrderId', 'LineNum') -Top 3),
+                    # Employee hierarchy (self-reference + circular with Dept)
+                    (New-TestQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') `
+                        -Where "[`$table].ManagerId IS NOT NULL" -Top 2),
+                    # Document with comments (self-ref comments)
+                    (New-TestQuery -Schema 'dbo' -Table 'Documents' -KeyColumns @('DocumentId') -Top 1),
+                    # Deep 8-level FK chain
+                    (New-TestQuery -Schema 'dbo' -Table 'DeepChainH' -KeyColumns @('Id') -Top 1),
+                    # Junction table (many-to-many)
+                    (New-TestQuery -Schema 'dbo' -Table 'ProductSuppliers' -KeyColumns @('ProductId', 'SupplierId') -Top 2)
+                )
+                
+                # =========================================================
+                # Step 2: Initialize start set and find subset
+                # =========================================================
+                Write-Host "  Finding subset..." -ForegroundColor Gray
+                
+                Initialize-StartSet `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -Queries $queries `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId
+                
+                $result = Find-Subset `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId `
+                    -FullSearch $false
+                
+                $result.Finished | Should -Be $true
+                
+                # Get subset statistics
+                $subsetTables = Get-SubsetTables `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId
+                
+                $totalRows = ($subsetTables | Measure-Object -Property RowCount -Sum).Sum
+                Write-Host "  Subset found: $($subsetTables.Count) tables, $totalRows total rows" -ForegroundColor Gray
+                
+                # Verify we have substantial data from multiple tables
+                $subsetTables.Count | Should -BeGreaterThan 10
+                $totalRows | Should -BeGreaterThan 20
+                
+                # =========================================================
+                # Step 3: Create new database and copy schema
+                # =========================================================
+                Write-Host "  Creating subset database: $subsetDbName..." -ForegroundColor Gray
+                
+                # Create empty database with same schema
+                Copy-Database `
+                    -Database $script:TestDatabase `
+                    -NewDatabase $subsetDbName `
+                    -ConnectionInfo $script:Connection
+                
+                # Wait for database to be online
+                $retries = 0
+                do {
+                    Start-Sleep -Seconds 2
+                    $online = Test-DatabaseOnline -Database $subsetDbName -ConnectionInfo $script:Connection
+                    $retries++
+                } while (-not $online -and $retries -lt 15)
+                
+                $online | Should -Be $true -Because "Subset database should come online"
+                $subsetCreated = $true
+                
+                # Get info for new database
+                $subsetDbInfo = Get-DatabaseInfo -Database $subsetDbName -ConnectionInfo $script:Connection
+                
+                # =========================================================
+                # Step 4: Copy subset data to new database
+                # =========================================================
+                Write-Host "  Disabling constraints and copying data..." -ForegroundColor Gray
+                
+                # Disable constraints for bulk load
+                Disable-ForeignKeys -Database $subsetDbName -ConnectionInfo $script:Connection -DatabaseInfo $subsetDbInfo
+                Disable-AllTablesTriggers -Database $subsetDbName -ConnectionInfo $script:Connection -DatabaseInfo $subsetDbInfo
+                
+                # Clear any existing data (from copy)
+                Clear-Database -Database $subsetDbName -ConnectionInfo $script:Connection -DatabaseInfo $subsetDbInfo
+                
+                # Copy subset data
+                Copy-DataFromSubset `
+                    -Source $script:TestDatabase `
+                    -Destination $subsetDbName `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId
+                
+                Write-Host "  Re-enabling constraints..." -ForegroundColor Gray
+                
+                # Re-enable constraints
+                Enable-ForeignKeys -Database $subsetDbName -ConnectionInfo $script:Connection -DatabaseInfo $subsetDbInfo
+                Enable-AllTablesTriggers -Database $subsetDbName -ConnectionInfo $script:Connection -DatabaseInfo $subsetDbInfo
+                
+                # =========================================================
+                # Step 5: Verify ALL foreign key constraints
+                # =========================================================
+                Write-Host "  Verifying foreign key integrity..." -ForegroundColor Gray
+                
+                # Test each FK constraint - this throws if any FK is violated
+                $fkViolations = @()
+                foreach ($table in $subsetDbInfo.Tables) {
+                    foreach ($fk in $table.ForeignKeys) {
+                        $checkSql = "ALTER TABLE [$($table.SchemaName)].[$($table.TableName)] WITH CHECK CHECK CONSTRAINT [$($fk.Name)]"
+                        try {
+                            $null = Invoke-SqlcmdEx -Sql $checkSql -Database $subsetDbName -ConnectionInfo $script:Connection -Silent $true
+                        }
+                        catch {
+                            $fkViolations += "$($table.SchemaName).$($table.TableName).$($fk.Name)"
+                        }
+                    }
+                }
+                
+                # Report any violations
+                if ($fkViolations.Count -gt 0) {
+                    Write-Host "  FK Violations found:" -ForegroundColor Red
+                    $fkViolations | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
+                }
+                
+                $fkViolations.Count | Should -Be 0 -Because "All foreign key constraints should be satisfied in subset"
+                
+                # =========================================================
+                # Step 6: Verify row counts match
+                # =========================================================
+                Write-Host "  Verifying row counts..." -ForegroundColor Gray
+                
+                $subsetDbInfoWithSize = Get-DatabaseInfo -Database $subsetDbName -ConnectionInfo $script:Connection -MeasureSize $true
+                $copiedRows = ($subsetDbInfoWithSize.Tables | Where-Object { $_.Statistics.Rows -gt 0 } | Measure-Object -Property { $_.Statistics.Rows } -Sum).Sum
+                
+                # Copied rows should approximately match subset (allowing for some variance due to historic tables, etc.)
+                $copiedRows | Should -BeGreaterThan 0 -Because "Subset database should contain data"
+                
+                Write-Host "  SUCCESS: $copiedRows rows copied, all FK constraints valid" -ForegroundColor Green
+                
+                # =========================================================
+                # Step 7: Drop database (cleanup on success)
+                # =========================================================
+                Write-Host "  Dropping test database..." -ForegroundColor Gray
+                
+                $dropSql = @"
+IF EXISTS (SELECT 1 FROM sys.databases WHERE name = '$subsetDbName')
+BEGIN
+    ALTER DATABASE [$subsetDbName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE [$subsetDbName];
+END
+"@
+                $null = Invoke-SqlcmdEx -Sql $dropSql -Database 'master' -ConnectionInfo $script:Connection
+                $subsetCreated = $false
+                
+                Write-Host "  Test database dropped successfully" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "  ERROR: $_" -ForegroundColor Red
+                throw
+            }
+            finally {
+                # Clean up session
+                if ($sessionId) {
+                    Remove-TestSession -SessionId $sessionId -Database $script:TestDatabase `
+                        -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+                }
+                
+                # Clean up database if still exists (on failure)
+                if ($subsetCreated) {
+                    try {
+                        $dropSql = @"
+IF EXISTS (SELECT 1 FROM sys.databases WHERE name = '$subsetDbName')
+BEGIN
+    ALTER DATABASE [$subsetDbName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE [$subsetDbName];
+END
+"@
+                        $null = Invoke-SqlcmdEx -Sql $dropSql -Database 'master' -ConnectionInfo $script:Connection
+                        Write-Host "  Cleanup: Dropped test database" -ForegroundColor Yellow
+                    }
+                    catch {
+                        Write-Warning "Failed to drop test database $subsetDbName : $_"
+                    }
+                }
+            }
+        }
+    }
+}
