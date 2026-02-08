@@ -3,14 +3,6 @@
 
 A PowerShell module for extracting referentially-consistent data subsets from SQL Server and Azure SQL.
 
-## 🆕 Version 2.0.1 (February 2026)
-
-- ✅ **`Find-Subset`** - 45% lower complexity, 50% less memory
-- ✅ **150+ unit tests** - Fast, database-free testing
-- ✅ **40+ integration tests** - Full FK traversal coverage
-- ✅ **Modular architecture** - 16 testable helper functions
-- 🐛 **Bug fixes** - Fixed data label swaps, undefined variables, type mismatches
-
 **[Changelog →](CHANGELOG.md)**
 
 ## Core Features
@@ -54,6 +46,16 @@ Get-SubsetTables -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -Con
 # 5. Cleanup
 Clear-SqlSizerSession -Database "MyDB" -SessionId $sessionId -ConnectionInfo $connection
 ```
+
+### TraversalState Values
+
+| State | Description |
+|-------|-------------|
+| `Include` | Record should be included in the subset |
+| `Exclude` | Record should be excluded from the subset |
+| `Pending` | Record needs evaluation - reachable but inclusion undecided |
+| `InboundOnly` | Only process incoming foreign keys |
+| `IncludeFull` | Include with forced incoming traversal (full search for this record) |
 
 **[See How It Works →](docs/HOW-IT-WORKS.md)** for complete algorithm details, traversal states, and advanced examples.
 
