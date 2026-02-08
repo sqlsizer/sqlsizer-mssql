@@ -49,6 +49,16 @@ Describe 'Get-NewTraversalState' {
 
             $result | Should -Be ([TraversalState]::Exclude)
         }
+
+        It 'IncludeFull state becomes Include' {
+            $result = Get-NewTraversalState `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -CurrentState ([TraversalState]::IncludeFull) `
+                -Fk $mockFk `
+                -FullSearch $false
+
+            $result | Should -Be ([TraversalState]::Include)
+        }
     }
 
     Context 'Incoming Direction' {
@@ -90,6 +100,26 @@ Describe 'Get-NewTraversalState' {
                 -FullSearch $false
 
             $result | Should -Be ([TraversalState]::Exclude)
+        }
+
+        It 'IncludeFull state becomes Include regardless of FullSearch' {
+            $result = Get-NewTraversalState `
+                -Direction ([TraversalDirection]::Incoming) `
+                -CurrentState ([TraversalState]::IncludeFull) `
+                -Fk $mockFk `
+                -FullSearch $false
+
+            $result | Should -Be ([TraversalState]::Include)
+        }
+
+        It 'IncludeFull state becomes Include when FullSearch is true' {
+            $result = Get-NewTraversalState `
+                -Direction ([TraversalDirection]::Incoming) `
+                -CurrentState ([TraversalState]::IncludeFull) `
+                -Fk $mockFk `
+                -FullSearch $true
+
+            $result | Should -Be ([TraversalState]::Include)
         }
     }
 
@@ -229,6 +259,14 @@ Describe 'Test-ShouldTraverseDirection' {
 
             $result | Should -Be $false
         }
+
+        It 'Returns true for IncludeFull state' {
+            $result = Test-ShouldTraverseDirection `
+                -State ([TraversalState]::IncludeFull) `
+                -Direction ([TraversalDirection]::Outgoing)
+
+            $result | Should -Be $true
+        }
     }
 
     Context 'Incoming Direction' {
@@ -271,6 +309,24 @@ Describe 'Test-ShouldTraverseDirection' {
                 -Direction ([TraversalDirection]::Incoming)
 
             $result | Should -Be $false
+        }
+
+        It 'Returns true for IncludeFull state regardless of FullSearch' {
+            $result = Test-ShouldTraverseDirection `
+                -State ([TraversalState]::IncludeFull) `
+                -Direction ([TraversalDirection]::Incoming) `
+                -FullSearch $false
+
+            $result | Should -Be $true
+        }
+
+        It 'Returns true for IncludeFull state when FullSearch is true' {
+            $result = Test-ShouldTraverseDirection `
+                -State ([TraversalState]::IncludeFull) `
+                -Direction ([TraversalDirection]::Incoming) `
+                -FullSearch $true
+
+            $result | Should -Be $true
         }
     }
 }

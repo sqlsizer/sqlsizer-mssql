@@ -389,6 +389,11 @@ Describe 'Assert-ValidTraversalState Tests' {
         $result = Assert-ValidTraversalState ([TraversalState]::InboundOnly)
         $result | Should -Be ([TraversalState]::InboundOnly)
     }
+    
+    It 'Returns valid IncludeFull state' {
+        $result = Assert-ValidTraversalState ([TraversalState]::IncludeFull)
+        $result | Should -Be ([TraversalState]::IncludeFull)
+    }
 }
 
 Describe 'Assert-ValidTraversalDirection Tests' {

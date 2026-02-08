@@ -672,6 +672,135 @@ Describe 'FullSearch Mode' {
 }
 
 # =====================================================
+# IncludeFull State Tests
+# =====================================================
+
+Describe 'IncludeFull State' {
+    AfterEach {
+        if ($testResult -and $testResult.SessionId) {
+            Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+    }
+    
+    Context 'Incoming FK Handling with IncludeFull' {
+        It 'Should include incoming FKs when using IncludeFull state even with FullSearch=false' {
+            # Start with Category using IncludeFull state - should include SubCategories even without global FullSearch
+            $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
+                -State ([TraversalState]::IncludeFull) `
+                -Where "[`$table].ParentCategoryId IS NULL" -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+            
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            # IncludeFull should pull in SubCategories even with FullSearch=false
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+        }
+        
+        It 'Should match FullSearch=true behavior for IncludeFull seed record' {
+            # Compare IncludeFull with FullSearch=false vs Include with FullSearch=true
+            # Both should include incoming FKs for the seed record
+            
+            # Test with IncludeFull + FullSearch=false
+            $queryIncludeFull = New-TestQuery -Schema 'dbo' -Table 'Suppliers' -KeyColumns @('SupplierId') `
+                -State ([TraversalState]::IncludeFull) -Top 1
+            
+            $resultIncludeFull = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($queryIncludeFull) `
+                -FullSearch $false
+            
+            $resultIncludeFull.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $resultIncludeFull.Summary -Schema 'dbo' -Table 'Suppliers' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $resultIncludeFull.Summary -Schema 'dbo' -Table 'ProductSuppliers' -MinRows 1
+            
+            Remove-TestSession -SessionId $resultIncludeFull.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+            $testResult = $null  # Clear for AfterEach
+        }
+        
+        It 'Should NOT cascade IncludeFull to discovered records' {
+            # IncludeFull should only affect the seed record, not propagate to child records
+            # Start with Category (IncludeFull), discover SubCategories (should get Include, not IncludeFull)
+            # SubCategories should NOT pull in their incoming FKs (Products) since they have Include state
+            
+            $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
+                -State ([TraversalState]::IncludeFull) `
+                -Where "[`$table].ParentCategoryId IS NULL" -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+            
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+            # Products should NOT be included - SubCategories get Include state, not IncludeFull
+            # So incoming FKs from Products -> SubCategories are not traversed
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products'
+        }
+    }
+    
+    Context 'Outgoing FK Handling with IncludeFull' {
+        It 'Should follow outgoing FKs like Include state' {
+            # IncludeFull should still follow outgoing FKs (dependencies)
+            $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') `
+                -State ([TraversalState]::IncludeFull) -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+            
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products' -MinRows 1
+            # Should follow outgoing FK to SubCategory
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+            # And then to Category (SubCategory -> Category FK)
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+        }
+    }
+    
+    Context 'Mixed States' {
+        It 'Should support IncludeFull and Include queries together' {
+            # One query with IncludeFull, another with Include - both should work correctly
+            $queryIncludeFull = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
+                -State ([TraversalState]::IncludeFull) `
+                -Where "[`$table].ParentCategoryId IS NULL" -Top 1
+            
+            $queryInclude = New-TestQuery -Schema 'dbo' -Table 'Customers' -KeyColumns @('CustomerId') `
+                -State ([TraversalState]::Include) -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($queryIncludeFull, $queryInclude) `
+                -FullSearch $false
+            
+            $testResult.Success | Should -Be $true
+            # Category with IncludeFull should pull SubCategories (incoming)
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+            # Customer with Include should NOT pull Orders (incoming, FullSearch=false)
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Orders'
+        }
+    }
+}
+
+# =====================================================
 # TraversalConfiguration Tests
 # =====================================================
 

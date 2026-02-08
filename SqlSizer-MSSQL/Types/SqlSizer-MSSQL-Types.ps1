@@ -20,6 +20,9 @@ enum TraversalState
     
     # Only process incoming FKs (was Color.Blue)
     InboundOnly = 4
+    
+    # Include with forced incoming traversal (like Include with FullSearch=true for this record only)
+    IncludeFull = 5
 }
 
 enum TraversalDirection

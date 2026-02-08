@@ -83,9 +83,13 @@ function Get-NewTraversalState
     {
         # When traversing outgoing FKs (dependencies):
         # Include -> Include (include referenced data)
+        # IncludeFull -> Include (follow dependencies, but don't cascade IncludeFull)
         # Exclude -> DO NOT TRAVERSE (exclusion is local, not propagated)
         # Pending -> Pending (propagate uncertainty to dependencies)
         if ($CurrentState -eq [TraversalState]::Include) {
+            $newState = [TraversalState]::Include
+        }
+        elseif ($CurrentState -eq [TraversalState]::IncludeFull) {
             $newState = [TraversalState]::Include
         }
         elseif ($CurrentState -eq [TraversalState]::Pending) {
@@ -105,6 +109,11 @@ function Get-NewTraversalState
             } else { 
                 $newState = [TraversalState]::Pending 
             }
+        }
+        elseif ($CurrentState -eq [TraversalState]::IncludeFull)
+        {
+            # IncludeFull always traverses incoming and marks found rows as Include
+            $newState = [TraversalState]::Include
         }
         # Pending and Exclude do not traverse incoming
     }
@@ -208,16 +217,21 @@ function Test-ShouldTraverseDirection
 
     if ($Direction -eq [TraversalDirection]::Outgoing)
     {
-        # Traverse outgoing FKs for Include and Pending
+        # Traverse outgoing FKs for Include, IncludeFull, and Pending
         return ($State -eq [TraversalState]::Include) -or 
+               ($State -eq [TraversalState]::IncludeFull) -or
                ($State -eq [TraversalState]::Pending)
     }
     else # Incoming
     {
-        # Traverse incoming FKs for Include (only when FullSearch=true) and InboundOnly
+        # Traverse incoming FKs for Include (only when FullSearch=true), IncludeFull (always), and InboundOnly
         if ($State -eq [TraversalState]::Include)
         {
             return $FullSearch
+        }
+        if ($State -eq [TraversalState]::IncludeFull)
+        {
+            return $true
         }
         return ($State -eq [TraversalState]::InboundOnly)
     }

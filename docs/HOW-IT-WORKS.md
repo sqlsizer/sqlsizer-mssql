@@ -158,6 +158,7 @@ Every record discovered during subset search is assigned a **TraversalState** th
 | **Exclude** | `[TraversalState]::Exclude` | Must NOT be in subset | None - stops here | ❌ Not in subset |
 | **Pending** | `[TraversalState]::Pending` | Discovered via incoming FKs (non-full search) | Outgoing only | Promoted to Include during traversal if reachable via Include path, otherwise Exclude |
 | **InboundOnly** | `[TraversalState]::InboundOnly` | For removal operations | Incoming only | Finds dependents |
+| **IncludeFull** | `[TraversalState]::IncludeFull` | Force incoming traversal for specific records | Outgoing + Incoming (always) | ✅ In subset |
 
 ### Traversal Directions
 
@@ -316,7 +317,7 @@ CREATE TABLE SqlSizer_abc123.Sales_Customer (
     Key1 VARCHAR(50),   -- Second PK column value (if composite)
     -- ... more KeyN columns for larger PKs
     
-    Color INT,          -- TraversalState (1=Include, 2=Exclude, 3=Pending, 4=InboundOnly)
+    Color INT,          -- TraversalState (1=Include, 2=Exclude, 3=Pending, 4=InboundOnly, 5=IncludeFull)
     SourceKey0 INT,     -- Source record that led to this one
     Depth INT,          -- Hops from seed records
     FkId INT,           -- Which FK relationship was followed
@@ -588,7 +589,7 @@ class TableFk {
 
 ```powershell
 class Query2 {
-    [TraversalState]$State     # Include, Exclude, Pending, or InboundOnly
+    [TraversalState]$State     # Include, Exclude, Pending, InboundOnly, or IncludeFull
     [string]$Schema            # Target table schema
     [string]$Table             # Target table name
     [string[]]$KeyColumns      # PK column names for identification
