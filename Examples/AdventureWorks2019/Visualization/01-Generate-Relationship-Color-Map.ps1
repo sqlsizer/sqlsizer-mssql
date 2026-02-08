@@ -19,7 +19,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName Query2
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum instead of legacy Color
+$query.State = [TraversalState]::Include  
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -27,29 +27,19 @@ $query.Where = "[`$table].FirstName = 'John'"
 $query.Top = 10
 $query.OrderBy = "[`$table].LastName ASC"
 
-# Define traversal configuration using modern API
-$config = New-Object -Type TraversalConfiguration
-
-foreach ($table in $info.Tables)
-{
-    $rule = New-Object -Type TraversalRule -ArgumentList $table.SchemaName, $table.TableName
-
-    # Use StateOverride instead of ForcedColor for modern configuration
-    $rule.StateOverride = New-Object -Type StateOverride -ArgumentList ([TraversalState]::Pending)
-
-    # Use TraversalConstraints instead of Condition for modern configuration
-    $rule.Constraints = New-Object -Type TraversalConstraints
-    $rule.Constraints.Top = 10 # limit all dependend data for each fk by 10 rows (it doesn't mean that there will be no more rows!)
-    $config.Rules += $rule
-}
+# Define ignored tables (empty - don't ignore any tables)
+$ignored = @()
 
 # Init start set
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset using refactored algorithm with modern TraversalConfiguration
-Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -TraversalConfiguration $config -SessionId $sessionId
+$result = Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables $ignored -DatabaseInfo $info -SessionId $sessionId
+Write-Host "Find-Subset result: Finished=$($result.Finished), CompletedIterations=$($result.CompletedIterations)"
 
 # Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+$subsetTables = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
+Write-Host "`nSubset tables with data:"
+$subsetTables | Format-Table -AutoSize
 
 # end of script
