@@ -304,8 +304,8 @@ function Find-Subset
 -- Mark remaining Pending as Exclude for $($table.SchemaName).$($table.TableName)
 DECLARE @ExcludedCount INT = 0;
 UPDATE $processing
-SET Color = $excludeState
-WHERE Color = $pendingState;
+SET [State] = $excludeState
+WHERE [State] = $pendingState;
 SET @ExcludedCount = @@ROWCOUNT;
 SELECT @ExcludedCount AS ExcludedCount;
 "@
@@ -341,14 +341,14 @@ SELECT TOP 1
     o.[Table] AS TableId,
     t.[Schema] AS TableSchema,
     t.TableName,
-    o.Color AS State,
+    o.[State] AS State,
     o.Depth,
     SUM(o.ToProcess - o.Processed) AS RemainingRecords
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
     AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.[Schema], t.TableName, o.Color, o.Depth
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
 ORDER BY RemainingRecords DESC
 "@
         }
@@ -360,14 +360,14 @@ SELECT TOP 1
     o.[Table] AS TableId,
     t.[Schema] AS TableSchema,
     t.TableName,
-    o.Color AS State,
+    o.[State] AS State,
     o.Depth,
     SUM(o.ToProcess - o.Processed) AS RemainingRecords
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
     AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.[Schema], t.TableName, o.Color, o.Depth
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
 ORDER BY o.Depth ASC, RemainingRecords DESC
 "@
         }
@@ -411,7 +411,7 @@ ORDER BY o.Depth ASC, RemainingRecords DESC
 UPDATE SqlSizer.Operations
 SET Status = 0, Processed = ToProcess
 WHERE [Table] = $($Operation.TableId)
-    AND Color = $state
+    AND [State] = $state
     AND Depth = $($Operation.Depth)
     AND Status IS NULL
     AND SessionId = '$SessionId'
@@ -435,7 +435,7 @@ BEGIN
         END
     FROM SqlSizer.Operations
     WHERE [Table] = $($Operation.TableId)
-        AND Color = $state
+        AND [State] = $state
         AND Depth = $($Operation.Depth)
         AND Status IS NULL
         AND SessionId = '$SessionId'
@@ -449,7 +449,7 @@ BEGIN
     SET Status = 0,
         Processed = Processed + @ProcessThisRow
     WHERE [Table] = $($Operation.TableId)
-        AND Color = $state
+        AND [State] = $state
         AND Depth = $($Operation.Depth)
         AND Status IS NULL
         AND SessionId = '$SessionId'

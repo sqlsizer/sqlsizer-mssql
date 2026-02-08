@@ -66,7 +66,7 @@ function Install-SqlSizerSessionTables
         {
             if ($Removal)
             {
-                $sql = "CREATE TABLE $($processing) (Id int identity(1,1) $pk, $($columns), [Color] tinyint NOT NULL, [Source] smallint NULL, [Depth] smallint NOT NULL, [Fk] smallint, [Iteration] int NOT NULL,)"
+                $sql = "CREATE TABLE $($processing) (Id int identity(1,1) $pk, $($columns), [State] tinyint NOT NULL, [Source] smallint NULL, [Depth] smallint NOT NULL, [Fk] smallint, [Iteration] int NOT NULL,)"
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
                 
@@ -75,11 +75,11 @@ function Install-SqlSizerSessionTables
             }
             else
             {
-                $sql = "CREATE TABLE $($processing) (Id int identity(1,1) $pk, $($columns), [Color] tinyint NOT NULL, [Source] smallint NULL, [Depth] smallint NOT NULL, [Fk] smallint, [Iteration] int NOT NULL,)"
+                $sql = "CREATE TABLE $($processing) (Id int identity(1,1) $pk, $($columns), [State] tinyint NOT NULL, [Source] smallint NULL, [Depth] smallint NOT NULL, [Fk] smallint, [Iteration] int NOT NULL,)"
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
                 
-                $sql = "CREATE NONCLUSTERED INDEX [Index] ON $($processing) ($($keysIndex), [Color] ASC)"
+                $sql = "CREATE NONCLUSTERED INDEX [Index] ON $($processing) ($($keysIndex), [State] ASC)"
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     
                 $sql = "CREATE NONCLUSTERED INDEX [Index_2] ON $($processing) ([Iteration]) INCLUDE ([Depth], [Fk])"

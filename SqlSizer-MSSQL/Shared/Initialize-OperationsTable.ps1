@@ -51,11 +51,11 @@ function Initialize-OperationsTable
 
         $tableId = $sqlSizerTable.Id
 
-        $sql = "INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [Color], [Depth], [Created], [SessionId], [FoundIteration])
-        SELECT $tableId, COUNT(*), 0, NULL, p.[Color], 0, GETDATE(), '$SessionId', $StartIteration
+        $sql = "INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [State], [Depth], [Created], [SessionId], [FoundIteration])
+        SELECT $tableId, COUNT(*), 0, NULL, p.[State], 0, GETDATE(), '$SessionId', $StartIteration
         FROM $($processing) p
         WHERE p.Iteration >= $StartIteration
-        GROUP BY [Color]"
+        GROUP BY [State]"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
     }
 }

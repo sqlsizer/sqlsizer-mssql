@@ -8,10 +8,10 @@ function Test-Queries
         [string]$Database,
 
         [Parameter(Mandatory = $true)]
-        [Query[]]$Queries,
+        [Query2[]]$Queries,
 
         [Parameter(Mandatory = $false)]
-        [ColorMap]$ColorMap = $null,
+        [TraversalConfiguration]$TraversalConfig = $null,
 
         [Parameter(Mandatory = $true)]
         [DatabaseInfo]$DatabaseInfo,
@@ -20,7 +20,7 @@ function Test-Queries
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    $unreachable = Find-UnreachableTables -Queries $Queries -DatabaseInfo $DatabaseInfo -ColorMap $ColorMap
+    $unreachable = Find-UnreachableTables -Queries $Queries -DatabaseInfo $DatabaseInfo -TraversalConfig $TraversalConfig
 
     if ($unreachable.Count -gt 0)
     {

@@ -4,7 +4,7 @@ function Find-ReachableTables
     param
     (
         [Parameter(Mandatory = $true)]
-        [Query[]]$Queries,
+        [Query2[]]$Queries,
 
         [Parameter(Mandatory = $true)]
         [DatabaseInfo]$DatabaseInfo,

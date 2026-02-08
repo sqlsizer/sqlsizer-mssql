@@ -182,7 +182,7 @@ WITH SourceRecords AS (
 NewRecords AS (
     SELECT $topClause
         $($selectColumns -join ",`n        "),
-        $Color AS Color,
+        $Color AS [State],
         $tableId AS TableId,
         $($Depth + 1) AS Depth,
         $fkId AS FkId,
@@ -195,8 +195,8 @@ NewRecords AS (
         WHERE $pkJoinCondition
     )
 )
-INSERT INTO $fkProcessing ($(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), Color, TableId, Depth, FkId, Iteration)
-SELECT $(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), Color, TableId, Depth, FkId, Iteration
+INSERT INTO $fkProcessing ($(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], TableId, Depth, FkId, Iteration)
+SELECT $(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], TableId, Depth, FkId, Iteration
 FROM NewRecords;
 
 -- Record operation
@@ -222,7 +222,7 @@ END
         $query += @"
 
 INSERT INTO SqlSizer.Operations 
-    ([Table], [Color], [ToProcess], [Status], [ParentTable], [FkId], [Depth], [StartDate], [SessionId], [Iteration])
+    ([Table], [State], [ToProcess], [Status], [ParentTable], [FkId], [Depth], [StartDate], [SessionId], [Iteration])
 VALUES 
     ($fkTableId, $Color, @RowCount, 0, $tableId, $fkId, $($Depth + 1), GETDATE(), '$SessionId', $Iteration);
 "@
@@ -332,12 +332,12 @@ VALUES
 SELECT TOP 1
     o.[Table],
     o.[Depth],
-    o.[Color],
+    o.[State],
     SUM(o.[ToProcess] - o.[Processed]) AS [Count]
 FROM SqlSizer.Operations o
 WHERE o.[Status] IS NULL 
     AND o.[SessionId] = '$SessionId'
-GROUP BY o.[Table], o.[Depth], o.[Color]
+GROUP BY o.[Table], o.[Depth], o.[State]
 HAVING SUM(o.[ToProcess] - o.[Processed]) > 0
 ORDER BY o.[Depth] ASC, [Count] DESC;
 "@
@@ -363,7 +363,7 @@ SELECT [Id], [ToProcess], [Processed]
 FROM SqlSizer.Operations 
 WHERE [Table] = $TableId 
     AND [Status] IS NULL 
-    AND [Color] = $Color 
+    AND [State] = $Color 
     AND [Depth] = $Depth 
     AND [SessionId] = '$SessionId';
 "@
@@ -494,7 +494,7 @@ WHERE [Status] = 0
 
         # Load table information
         $tableId = $operation.Table
-        $color = $operation.Color
+        $color = $operation.State
         $depth = $operation.Depth
         $tableData = $tablesById["$tableId"]
         $table = $DatabaseInfo.Tables | Where-Object { 

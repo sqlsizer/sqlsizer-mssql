@@ -42,7 +42,7 @@ function Install-SqlSizerResultViews
             continue
         }
 
-        $sql = "CREATE VIEW SqlSizer_$($SessionId).Result_$($table.SchemaName)_$($table.TableName) AS SELECT $tableSelect, sqlsizer_color from $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
+        $sql = "CREATE VIEW SqlSizer_$($SessionId).Result_$($table.SchemaName)_$($table.TableName) AS SELECT $tableSelect, sqlsizer_state from $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
 }
@@ -75,7 +75,7 @@ function GetResultViewsTableJoin
         $i = $i + 1
     }
 
-    $sql = " (SELECT $([string]::Join(',', $select)), [Color] as sqlsizer_color
+    $sql = " (SELECT $([string]::Join(',', $select)), [State] as sqlsizer_state
                FROM $($processing) p) rr ON $([string]::Join(' and ', $join))"
 
     return $sql

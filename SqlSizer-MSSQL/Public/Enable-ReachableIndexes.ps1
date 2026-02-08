@@ -4,7 +4,7 @@ function Enable-ReachableIndexes
     param
     (
         [Parameter(Mandatory = $true)]
-        [Query[]]$Queries,
+        [Query2[]]$Queries,
 
         [Parameter(Mandatory = $true)]
         [string]$Database,

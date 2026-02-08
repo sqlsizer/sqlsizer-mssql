@@ -1,12 +1,3 @@
-enum Color
-{
-    Red = 1
-    Green = 2
-    Yellow = 3
-    Blue = 4
-    Purple = 5
-}
-
 enum ForeignKeyRule
 {
     NoAction = 1
@@ -37,24 +28,6 @@ enum TraversalDirection
     Incoming = 2  # Follow FKs from tables that reference current table
 }
 
-class ColorMap
-{
-    [ColorItem[]]$Items
-}
-
-class ColorItem
-{
-    [string]$SchemaName
-    [string]$TableName
-    [ForcedColor]$ForcedColor
-    [Condition]$Condition
-}
-
-class ForcedColor
-{
-    [Color]$Color
-}
-
 class Condition
 {
     [int]$Top = -1
@@ -62,17 +35,6 @@ class Condition
     [string]$SourceTableName = ""
     [int]$MaxDepth = -1
     [string]$FkName = ""
-}
-
-class Query
-{
-    [Color]$Color
-    [string]$Schema
-    [string]$Table
-    [string[]]$KeyColumns
-    [string]$Where
-    [int]$Top
-    [string]$OrderBy
 }
 
 class Query2
@@ -131,11 +93,11 @@ class TableInfo2
     }
 }
 
-class TableInfo2WithColor
+class TableInfo2WithState
 {
     [string]$SchemaName
     [string]$TableName
-    [Color]$Color
+    [TraversalState]$State
 }
 
 class SubsettingTableResult

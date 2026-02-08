@@ -5,6 +5,24 @@ All notable changes to SqlSizer-MSSQL will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-02-08
+
+### Breaking Changes
+- **Removed legacy types**: `enum Color`, `ColorMap`, `ColorItem`, `ForcedColor`, `Query`, `TableInfo2WithColor`
+- Functions now require `Query2[]` instead of `Query[]`: `Find-UnreachableTables`, `Test-Queries`, `Find-ReachableTables`, `Enable-ReachableIndexes`, `Disable-ReachableIndexes`, `Install-ForeignKeyIndexes`
+- `Find-UnreachableTables` and `Test-Queries` now use `TraversalConfiguration` instead of `ColorMap`
+- Database column `[Color]` renamed to `[State]` in all SQL DDL
+
+### Added
+- `TableInfo2WithState` class (replacement for `TableInfo2WithColor`)
+
+### Changed
+- All traversal functions now exclusively use `TraversalState` enum instead of `Color`
+- SQL views now expose `sqlsizer_state` instead of `sqlsizer_color`
+
+### Removed
+- Deprecated example files using `Bidirectional` state (feature discontinued)
+
 ## [2.0.1] - 2026-02-07
 
 ### Fixed
@@ -118,17 +136,27 @@ Key milestones in earlier versions:
 
 ## Migration Notes
 
-### To Refactored Algorithms
-1. Replace `Find-Subset` with `Find-Subset`
-2. Replace `Find-RemovalSubset` with `Find-RemovalSubset`
-3. All parameters remain the same (100% backward compatible)
-4. Optionally migrate from `ColorMap` to `TraversalConfiguration` (recommended)
+### To Version 2.0.2
+1. Replace `Query` with `Query2` and use `.State` instead of `.Color`
+2. Replace `ColorMap` with `TraversalConfiguration` 
+3. Replace `ColorItem` with `TraversalRule`
+4. Replace `ForcedColor` with `StateOverride`
+5. Replace `TableInfo2WithColor` with `TableInfo2WithState`
+6. Update any direct SQL queries: column `[Color]` is now `[State]`
+
+### Color → TraversalState Mapping
+| Legacy Color | TraversalState |
+|-------------|----------------|
+| Green (2)   | Include (1)    |
+| Red (1)     | Exclude (2)    |
+| Yellow (3)  | Pending (3)    |
+| Blue (4)    | InboundOnly (4)|
+| Purple (5)  | *Removed*      |
 
 ### Backward Compatibility
-All original functions remain available:
-- `Find-Subset` - Original algorithm (still supported)
-- `Find-RemovalSubset` - Original removal algorithm (still supported)
-- Legacy types (`Color`, `ColorMap`, etc.) continue to work
+All original functions remain available but require updated types:
+- `Find-Subset` - Uses `Query2` and `TraversalConfiguration`
+- `Find-RemovalSubset` - Removal algorithm (still supported)
 
 ## Contributing
 

@@ -85,7 +85,7 @@ Describe 'New-MarkOperationInProgressQuery' {
                 -MaxBatchSize -1
 
             $result | Should -Match '\[Table\] = 10'
-            $result | Should -Match 'Color = 2'
+            $result | Should -Match '\[State\] = 2'
             $result | Should -Match 'Depth = 5'
         }
 
@@ -248,8 +248,8 @@ Describe 'New-ExcludePendingQuery' {
             -TableInfo $mockTableInfo
 
         # Pending state = 3, Exclude state = 2
-        $result | Should -Match 'SET Color = 2'
-        $result | Should -Match 'WHERE Color = 3'
+        $result | Should -Match 'SET \[State\] = 2'
+        $result | Should -Match 'WHERE \[State\] = 3'
     }
 
     It 'Uses correct processing table' {
@@ -533,7 +533,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -FullSearch $false
 
             # INSERT should only list Key0 (since FK has 1 column)
-            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Color, Source, Depth, Fk, Iteration\)'
+            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, \[State\], Source, Depth, Fk, Iteration\)'
         }
 
         It 'Generates correct INSERT column list for composite key' {
@@ -556,7 +556,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
 
             # For outgoing: target columns = FK columns (2 columns)
             # INSERT should list Key0, Key1
-            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Key1, Color, Source, Depth, Fk, Iteration\)'
+            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Key1, \[State\], Source, Depth, Fk, Iteration\)'
         }
 
         It 'Does not include hardcoded 8-column key list' {

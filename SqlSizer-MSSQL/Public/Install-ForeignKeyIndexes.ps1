@@ -7,7 +7,7 @@ function Install-ForeignKeyIndexes
         [string]$Database,
 
         [Parameter(Mandatory = $true)]
-        [Query[]]$Queries,
+        [Query2[]]$Queries,
 
         [Parameter(Mandatory = $false)]
         [bool]$OnlyMissing = $true,

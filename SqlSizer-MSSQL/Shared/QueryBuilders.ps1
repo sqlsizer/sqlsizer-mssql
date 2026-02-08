@@ -202,7 +202,7 @@ NewRecords AS (
             WHERE $notExistsClause
         )
 )
-INSERT INTO $TargetProcessing ($targetKeyListForInsert, Color, Source, Depth, Fk, Iteration)
+INSERT INTO $TargetProcessing ($targetKeyListForInsert, [State], Source, Depth, Fk, Iteration)
 OUTPUT inserted.Depth INTO @InsertedRows
 SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
@@ -212,9 +212,9 @@ FROM NewRecords;
 $(if ($NewState -eq [TraversalState]::Include) {
 @"
 UPDATE existing
-SET Color = $([int][TraversalState]::Include)
+SET [State] = $([int][TraversalState]::Include)
 FROM $TargetProcessing existing
-WHERE existing.Color = $([int][TraversalState]::Pending)
+WHERE existing.[State] = $([int][TraversalState]::Pending)
     AND EXISTS (
         SELECT 1 FROM (
             SELECT DISTINCT $targetKeyList
@@ -229,7 +229,7 @@ WHERE existing.Color = $([int][TraversalState]::Pending)
 
 -- Update operations table
 INSERT INTO SqlSizer.Operations (
-    [Table], Color, ToProcess, Processed, Status, Source, Fk, Depth, 
+    [Table], [State], ToProcess, Processed, Status, Source, Fk, Depth, 
     Created, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
 )
 SELECT 
@@ -282,8 +282,8 @@ function New-ExcludePendingQuery
     $query = @"
 -- Mark remaining Pending as Exclude for $($TableInfo.SchemaName).$($TableInfo.TableName)
 UPDATE $ProcessingTable
-SET Color = $excludeState
-WHERE Color = $pendingState;
+SET [State] = $excludeState
+WHERE [State] = $pendingState;
 
 GO
 
@@ -319,14 +319,14 @@ SELECT TOP 1
     o.[Table] AS TableId,
     t.SchemaName AS TableSchema,
     t.TableName,
-    o.Color AS State,
+    o.[State] AS State,
     o.Depth,
     SUM(o.ToProcess - o.Processed) AS RemainingRecords
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
     AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.SchemaName, t.TableName, o.Color, o.Depth
+GROUP BY o.[Table], t.SchemaName, t.TableName, o.[State], o.Depth
 ORDER BY RemainingRecords DESC
 "@
     }
@@ -338,14 +338,14 @@ SELECT TOP 1
     o.[Table] AS TableId,
     t.SchemaName AS TableSchema,
     t.TableName,
-    o.Color AS State,
+    o.[State] AS State,
     o.Depth,
     SUM(o.ToProcess - o.Processed) AS RemainingRecords
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
     AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.SchemaName, t.TableName, o.Color, o.Depth
+GROUP BY o.[Table], t.SchemaName, t.TableName, o.[State], o.Depth
 ORDER BY o.Depth ASC, RemainingRecords DESC
 "@
     }
@@ -387,7 +387,7 @@ function New-MarkOperationInProgressQuery
 UPDATE SqlSizer.Operations
 SET Status = 0, Processed = ToProcess
 WHERE [Table] = $TableId
-    AND Color = $State
+    AND [State] = $State
     AND Depth = $Depth
     AND Status IS NULL
     AND SessionId = '$SessionId'
@@ -411,7 +411,7 @@ BEGIN
         END
     FROM SqlSizer.Operations
     WHERE [Table] = $TableId
-        AND Color = $State
+        AND [State] = $State
         AND Depth = $Depth
         AND Status IS NULL
         AND SessionId = '$SessionId'
@@ -425,7 +425,7 @@ BEGIN
     SET Status = 0,
         Processed = Processed + @ProcessThisRow
     WHERE [Table] = $TableId
-        AND Color = $State
+        AND [State] = $State
         AND Depth = $Depth
         AND Status IS NULL
         AND SessionId = '$SessionId'
