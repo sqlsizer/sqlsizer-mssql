@@ -7,11 +7,6 @@
     proper error handling and validation logic.
 #>
 
-BeforeAll {
-    $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
-}
-
 Describe 'Assert-NotNull Tests' {
     It 'Returns value when not null' {
         $result = Assert-NotNull "test" "param"

@@ -3,7 +3,7 @@
     Runs all Pester tests for SqlSizer-MSSQL module.
     
 .DESCRIPTION
-    Executes all unit tests with code coverage and generates reports.
+    Executes unit tests and optionally integration tests with code coverage.
     
 .PARAMETER CodeCoverage
     Enable code coverage analysis.
@@ -11,11 +11,29 @@
 .PARAMETER OutputPath
     Path for test results output.
     
+.PARAMETER Integration
+    Include integration tests (requires SQL Server connection).
+    
+.PARAMETER DataSize
+    Data size for integration tests: Tiny, Small, Medium, Large, XLarge, Custom.
+    
+.PARAMETER Server
+    SQL Server instance for integration tests (default: .)
+    
+.PARAMETER SkipDataSetup
+    Skip database initialization for integration tests (use existing data).
+    
 .EXAMPLE
     .\Run-Tests.ps1
     
 .EXAMPLE
     .\Run-Tests.ps1 -CodeCoverage -OutputPath .\TestResults
+    
+.EXAMPLE
+    .\Run-Tests.ps1 -Integration -DataSize Small
+    
+.EXAMPLE
+    .\Run-Tests.ps1 -Integration -DataSize Medium -Server "localhost\SQLEXPRESS"
 #>
 
 [CmdletBinding()]
@@ -24,7 +42,20 @@ param(
     [switch]$CodeCoverage,
     
     [Parameter(Mandatory = $false)]
-    [string]$OutputPath = ".\Tests\Results"
+    [string]$OutputPath = ".\Tests\Results",
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$Integration,
+    
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Tiny', 'Small', 'Medium', 'Large', 'XLarge', 'Custom')]
+    [string]$DataSize = 'Small',
+    
+    [Parameter(Mandatory = $false)]
+    [string]$Server = '.',
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDataSetup
 )
 
 # Ensure output directory exists
@@ -35,6 +66,13 @@ if (-not (Test-Path $OutputPath)) {
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host " SqlSizer-MSSQL Test Suite" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
+if ($Integration) {
+    Write-Host " Mode: Unit + Integration Tests" -ForegroundColor White
+}
+else {
+    Write-Host " Mode: Unit Tests Only" -ForegroundColor White
+    Write-Host " (Use -Integration for integration tests)" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # Import Pester
@@ -43,8 +81,32 @@ Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
 # Create Pester configuration
 $config = New-PesterConfiguration
 
-# Set test paths
-$config.Run.Path = '.\Tests\'
+# Set test paths based on whether integration tests are included
+if ($Integration) {
+    Write-Host "Including integration tests (DataSize: $DataSize, Server: $Server)" -ForegroundColor Yellow
+    
+    # Set environment variables for integration tests
+    $env:SQLSIZER_TEST_DATASIZE = $DataSize
+    $env:SQLSIZER_TEST_SERVER = $Server
+    $env:SQLSIZER_TEST_SKIPDATASETUP = if ($SkipDataSetup) { '1' } else { '0' }
+    
+    # Run both unit and integration tests
+    $config.Run.Path = @(
+        '.\Tests\TraversalHelpers.Tests.ps1',
+        '.\Tests\QueryBuilders.Tests.ps1',
+        '.\Tests\ValidationHelpers.Tests.ps1',
+        '.\Tests\Find-Subset.Integration.Tests.ps1'
+    )
+}
+else {
+    # Run only unit tests (exclude integration tests)
+    $config.Run.Path = @(
+        '.\Tests\TraversalHelpers.Tests.ps1',
+        '.\Tests\QueryBuilders.Tests.ps1',
+        '.\Tests\ValidationHelpers.Tests.ps1'
+    )
+}
+
 $config.Run.PassThru = $true
 
 # Output settings

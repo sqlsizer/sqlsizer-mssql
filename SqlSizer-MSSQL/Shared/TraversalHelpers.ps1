@@ -186,7 +186,11 @@ function Test-ShouldTraverseDirection
         Determines if we should traverse in a given direction for a state.
     .DESCRIPTION
         Pure function that returns boolean indicating whether traversal
-        should proceed based on state and direction.
+        should proceed based on state, direction, and FullSearch mode.
+        
+        When FullSearch=false, incoming FK traversal is disabled for Include state.
+        This prevents including rows that reference the subset but aren't required
+        for referential integrity.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -196,7 +200,10 @@ function Test-ShouldTraverseDirection
         [TraversalState]$State,
         
         [Parameter(Mandatory = $true)]
-        [TraversalDirection]$Direction
+        [TraversalDirection]$Direction,
+        
+        [Parameter(Mandatory = $false)]
+        [bool]$FullSearch = $false
     )
 
     if ($Direction -eq [TraversalDirection]::Outgoing)
@@ -207,9 +214,12 @@ function Test-ShouldTraverseDirection
     }
     else # Incoming
     {
-        # Traverse incoming FKs for Include and InboundOnly
-        return ($State -eq [TraversalState]::Include) -or 
-               ($State -eq [TraversalState]::InboundOnly)
+        # Traverse incoming FKs for Include (only when FullSearch=true) and InboundOnly
+        if ($State -eq [TraversalState]::Include)
+        {
+            return $FullSearch
+        }
+        return ($State -eq [TraversalState]::InboundOnly)
     }
 }
 

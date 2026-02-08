@@ -8,10 +8,7 @@
 #>
 
 BeforeAll {
-    # Import the module
     $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
-    
     . "$modulePath\SqlSizer-MSSQL\Shared\Get-ColumnValue.ps1"
 }
 

@@ -183,8 +183,8 @@ function Initialize-StartSet
             $orderByClause = " ORDER BY $($query.OrderBy)"
         }
         
-        # Validate WHERE clause if specified
-        if ($null -ne $query.Where)
+        # Validate WHERE clause if specified and not empty
+        if (-not [string]::IsNullOrWhiteSpace($query.Where))
         {
             # Basic SQL injection protection (allow -- in column names like [--Comment] but not as comment starter)
             if ($query.Where -match '[;]|--(?!\s*\[)|\bDROP\b|\bDELETE\b|\bEXEC\b|\bUPDATE\b')
@@ -213,8 +213,8 @@ function Initialize-StartSet
         $sql += "$([int]$query.State) as [State], NULL as [ParentTable], 0 as [ParentIteration], NULL as [ChildTable], $StartIteration as [Iteration]"
         $sql += " FROM $($query.Schema).$($query.Table) as $tableAlias"
 
-        # Add WHERE clause if specified
-        if ($null -ne $query.Where)
+        # Add WHERE clause if specified and not empty
+        if (-not [string]::IsNullOrWhiteSpace($query.Where))
         {
             $sql += " WHERE $($query.Where)"
         }

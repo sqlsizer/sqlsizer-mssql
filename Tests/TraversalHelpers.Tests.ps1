@@ -7,12 +7,6 @@
     Tests cover state transitions, constraints, and traversal logic.
 #>
 
-BeforeAll {
-    $modulePath = Split-Path -Parent $PSScriptRoot
-    Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Verbose
-}
-
-
 Describe 'Get-NewTraversalState' {
     BeforeAll {
         # Create TableFk object
@@ -238,10 +232,19 @@ Describe 'Test-ShouldTraverseDirection' {
     }
 
     Context 'Incoming Direction' {
-        It 'Returns true for Include state' {
+        It 'Returns false for Include state when FullSearch=false (default)' {
             $result = Test-ShouldTraverseDirection `
                 -State ([TraversalState]::Include) `
                 -Direction ([TraversalDirection]::Incoming)
+
+            $result | Should -Be $false
+        }
+
+        It 'Returns true for Include state when FullSearch=true' {
+            $result = Test-ShouldTraverseDirection `
+                -State ([TraversalState]::Include) `
+                -Direction ([TraversalDirection]::Incoming) `
+                -FullSearch $true
 
             $result | Should -Be $true
         }

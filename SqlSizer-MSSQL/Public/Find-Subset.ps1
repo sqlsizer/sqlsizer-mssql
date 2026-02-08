@@ -93,8 +93,8 @@ function Find-Subset
 
         # Use List<string> instead of += for efficient string building
         $queryList = [System.Collections.Generic.List[string]]::new()
-        $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
-        $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
+        $tableId = $script:tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
+        $processing = $script:structure.GetProcessingName($script:structure.Tables[$Table], $SessionId)
 
         $relationships = if ($Direction -eq [TraversalDirection]::Outgoing) {
             $Table.ForeignKeys
@@ -126,6 +126,13 @@ function Find-Subset
                 }
 
                 $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration -FullSearch $FullSearch
+                
+                # Skip traversal when StateOverride is Exclude
+                if ($newState -eq [TraversalState]::Exclude)
+                {
+                    continue
+                }
+                
                 $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
 
                 # O(1) lookup using hashtable instead of Where-Object
@@ -136,10 +143,10 @@ function Find-Subset
                     continue
                 }
 
-                $targetTableId = $tablesGroupedByName["$targetSchema, $targetTable"].Id
-                $targetSignature = $structure.Tables[$targetTableInfo]
-                $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
-                $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
+                $targetTableId = $script:tablesGroupedByName["$targetSchema, $targetTable"].Id
+                $targetSignature = $script:structure.Tables[$targetTableInfo]
+                $targetProcessing = $script:structure.GetProcessingName($targetSignature, $SessionId)
+                $fkId = $script:fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
 
                 # Build CTE-based query using shared function
                 $query = New-CTETraversalQuery `
@@ -190,8 +197,8 @@ function Find-Subset
                        -PercentComplete $percentComplete
 
         # Check which directions to traverse
-        $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing)
-        $traverseIncoming = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming)
+        $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing) -FullSearch $FullSearch
+        $traverseIncoming = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Incoming) -FullSearch $FullSearch
 
         # Collect queries for batched execution
         $batchedQueries = [System.Collections.Generic.List[string]]::new()
@@ -289,8 +296,8 @@ function Find-Subset
         # Mark ALL remaining Pending as Exclude (those not promoted to Include during traversal)
         foreach ($table in $tables)
         {
-            $signature = $structure.Tables[$table]
-            $processing = $structure.GetProcessingName($signature, $SessionId)
+            $signature = $script:structure.Tables[$table]
+            $processing = $script:structure.GetProcessingName($signature, $SessionId)
             $pendingState = [int][TraversalState]::Pending
             $excludeState = [int][TraversalState]::Exclude
 
@@ -555,7 +562,7 @@ WHERE SessionId = '$SessionId'
     #region Main Execution
 
     # Initialize metadata
-    $structure = [Structure]::new($DatabaseInfo)
+    $script:structure = [Structure]::new($DatabaseInfo)
     $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
     $script:tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
     $script:fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
