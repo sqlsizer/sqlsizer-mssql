@@ -81,8 +81,9 @@ function Find-RemovalSubset
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    # Query cache for FK traversal patterns - keyed by "fkSchema_fkTable_tableSchema_table"
-    $incomingQueryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string]]"
+    # Query cache for FK traversal patterns - keyed by "schema_table_color"
+    # Value is an array of query templates for all incoming FKs for that table
+    $incomingQueryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string[]]]"
     
     # Metadata
     $structure = [Structure]::new($DatabaseInfo)
@@ -112,8 +113,8 @@ function Find-RemovalSubset
             [int]$Color,
             [TableInfo]$ReferencedByTable,
             [TableFk]$Fk,
-            [int]$Depth,
-            [int]$Iteration
+            $Depth,       # Can be int or string placeholder "##DEPTH##"
+            $Iteration    # Can be int or string placeholder "##ITERATION##"
         )
 
         $tableId = $tablesByName[$Table.SchemaName + ", " + $Table.TableName].Id
@@ -124,35 +125,39 @@ function Find-RemovalSubset
         $fkSignature = $structure.Tables[$fkTable]
         $fkProcessing = $structure.GetProcessingName($fkSignature, $SessionId)
         $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
-        $primaryKey = $ReferencedByTable.PrimaryKey
+        
+        # Source table's primary key (for the SourceRecords CTE)
+        $sourcePrimaryKey = $Table.PrimaryKey
+        # FK table's primary key (for the INSERT into FK processing table)
+        $fkPrimaryKey = $ReferencedByTable.PrimaryKey
 
-        if (($null -eq $primaryKey) -or ($primaryKey.Count -eq 0))
+        if (($null -eq $fkPrimaryKey) -or ($fkPrimaryKey.Count -eq 0))
         {
             return $null
         }
 
-        # Build CTE for source records
+        # Build CTE for source records (columns based on SOURCE table's PK)
         $sourceColumns = @()
-        for ($srcIdx = 0; $srcIdx -lt $primaryKey.Count; $srcIdx++)
+        for ($srcIdx = 0; $srcIdx -lt $sourcePrimaryKey.Count; $srcIdx++)
         {
-            $sourceColumns += "s.Key$srcIdx"
+            $sourceColumns += "Key$srcIdx"
         }
 
-        # Build JOIN condition between FK table and source
+        # Build JOIN condition between FK table and source (with alias s.)
         $joinConditions = @()
         for ($joinIdx = 0; $joinIdx -lt $Fk.FkColumns.Count; $joinIdx++)
         {
             $joinConditions += "f.$($Fk.FkColumns[$joinIdx].Name) = s.Key$joinIdx"
         }
 
-        # Build columns for result
+        # Build columns for result (based on FK table's primary key)
         $selectColumns = @()
-        for ($selIdx = 0; $selIdx -lt $primaryKey.Count; $selIdx++)
+        for ($selIdx = 0; $selIdx -lt $fkPrimaryKey.Count; $selIdx++)
         {
             $columnValue = Get-ColumnValue `
-                -ColumnName $primaryKey[$selIdx].Name `
+                -ColumnName $fkPrimaryKey[$selIdx].Name `
                 -Prefix "f." `
-                -dataType $primaryKey[$selIdx].dataType
+                -dataType $fkPrimaryKey[$selIdx].dataType
             $selectColumns += "$columnValue AS Key$selIdx"
         }
 
@@ -163,18 +168,22 @@ function Find-RemovalSubset
             $topClause = "TOP ($MaxBatchSize)"
         }
 
-        # Build primary key join conditions for NOT EXISTS clause
+        # Build primary key join conditions for NOT EXISTS clause (using FK table's PK)
         $pkJoinConditions = @()
-        for ($pkIdx = 0; $pkIdx -lt $primaryKey.Count; $pkIdx++)
+        for ($pkIdx = 0; $pkIdx -lt $fkPrimaryKey.Count; $pkIdx++)
         {
-            $pkJoinConditions += "p.Key$pkIdx = f.$($primaryKey[$pkIdx].Name)"
+            $pkJoinConditions += "p.Key$pkIdx = f.$($fkPrimaryKey[$pkIdx].Name)"
         }
         $pkJoinCondition = $pkJoinConditions -join ' AND '
 
-        # Generate CTE-based query
+        # Calculate depth+1 for the template (if $Depth is placeholder, use placeholder+1)
+        $depthPlusOne = if ($Depth -eq "##DEPTH##") { "##DEPTH_PLUS_1##" } else { $Depth + 1 }
+
+        # Generate CTE-based query (semicolon prefix for CTE is SQL Server best practice)
+        # Note: Processing table columns are: Key0..N, [State], [Source], [Depth], [Fk], [Iteration]
         $query = @"
 -- Find incoming references from $($Fk.FkSchema).$($Fk.FkTable) to $($Table.SchemaName).$($Table.TableName)
-WITH SourceRecords AS (
+;WITH SourceRecords AS (
     SELECT $($sourceColumns -join ', ')
     FROM $processing
     WHERE Depth = $Depth
@@ -183,10 +192,10 @@ NewRecords AS (
     SELECT $topClause
         $($selectColumns -join ",`n        "),
         $Color AS [State],
-        $tableId AS TableId,
-        $($Depth + 1) AS Depth,
-        $fkId AS FkId,
-        $Iteration AS Iteration
+        $tableId AS [Source],
+        $depthPlusOne AS [Depth],
+        $fkId AS [Fk],
+        $Iteration AS [Iteration]
     FROM $($ReferencedByTable.SchemaName).$($ReferencedByTable.TableName) f
     INNER JOIN SourceRecords s ON $($joinConditions -join ' AND ')
     WHERE NOT EXISTS (
@@ -195,8 +204,8 @@ NewRecords AS (
         WHERE $pkJoinCondition
     )
 )
-INSERT INTO $fkProcessing ($(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], TableId, Depth, FkId, Iteration)
-SELECT $(0..($primaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], TableId, Depth, FkId, Iteration
+INSERT INTO $fkProcessing ($(0..($fkPrimaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], [Source], [Depth], [Fk], [Iteration])
+SELECT $(0..($fkPrimaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String -Separator ', '), [State], [Source], [Depth], [Fk], [Iteration]
 FROM NewRecords;
 
 -- Record operation
@@ -222,9 +231,9 @@ END
         $query += @"
 
 INSERT INTO SqlSizer.Operations 
-    ([Table], [State], [ToProcess], [Status], [ParentTable], [FkId], [Depth], [StartDate], [SessionId], [Iteration])
+    ([Table], [State], ToProcess, Processed, Status, Source, Fk, Depth, Created, ProcessedDate, SessionId, FoundIteration, ProcessedIteration)
 VALUES 
-    ($fkTableId, $Color, @RowCount, 0, $tableId, $fkId, $($Depth + 1), GETDATE(), '$SessionId', $Iteration);
+    ($fkTableId, $Color, @RowCount, 0, NULL, $tableId, $fkId, $depthPlusOne, GETDATE(), NULL, '$SessionId', $Iteration, NULL);
 "@
 
         return $query
@@ -256,7 +265,7 @@ VALUES
             {
                 if ($null -ne $query -and $query -ne "")
                 {
-                    $queries += $query.Replace("##DEPTH##", $Depth).Replace("##ITERATION##", $Iteration)
+                    $queries += $query.Replace("##DEPTH##", $Depth).Replace("##DEPTH_PLUS_1##", ($Depth + 1)).Replace("##ITERATION##", $Iteration)
                 }
             }
         }
@@ -301,7 +310,7 @@ VALUES
             {
                 if ($null -ne $query -and $query -ne "")
                 {
-                    $queries += $query.Replace("##DEPTH##", $Depth).Replace("##ITERATION##", $Iteration)
+                    $queries += $query.Replace("##DEPTH##", $Depth).Replace("##DEPTH_PLUS_1##", ($Depth + 1)).Replace("##ITERATION##", $Iteration)
                 }
             }
         }
@@ -309,11 +318,10 @@ VALUES
         # Execute all queries
         if ($queries.Count -gt 0)
         {
-            # Execute queries individually with GO
-            foreach ($query in $queries)
+            # Execute each query individually
+            foreach ($singleQuery in $queries)
             {
-                $wrappedQuery = $query + "`nGO`n"
-                $null = Invoke-SqlcmdEx -Sql $wrappedQuery -Database $Database -ConnectionInfo $ConnectionInfo
+                $null = Invoke-SqlcmdEx -Sql $singleQuery -Database $Database -ConnectionInfo $ConnectionInfo
             }
         }
     }

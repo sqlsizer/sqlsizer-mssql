@@ -495,3 +495,119 @@ function New-TraversalRuleWithStateOverride {
     $rule.StateOverride = New-Object StateOverride -ArgumentList $State
     return $rule
 }
+
+function Invoke-FindRemovalSubsetTest {
+    <#
+    .SYNOPSIS
+        Executes a complete Find-RemovalSubset test cycle.
+    
+    .DESCRIPTION
+        Creates session, initializes start set with InboundOnly state, runs Find-RemovalSubset, and returns summary.
+        Find-RemovalSubset traverses INCOMING foreign keys to find rows that reference the target rows
+        and must be removed first to maintain referential integrity during deletion.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Database,
+        
+        [Parameter(Mandatory = $true)]
+        [SqlConnectionInfo]$ConnectionInfo,
+        
+        [Parameter(Mandatory = $true)]
+        [DatabaseInfo]$DatabaseInfo,
+        
+        [Parameter(Mandatory = $true)]
+        [Query2[]]$Queries,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$MaxBatchSize = -1
+    )
+    
+    # Create session with Removal mode
+    $sessionId = Start-SqlSizerSession `
+        -Database $Database `
+        -ConnectionInfo $ConnectionInfo `
+        -DatabaseInfo $DatabaseInfo `
+        -Removal $true
+    
+    try {
+        # Initialize start set
+        $null = Initialize-StartSet `
+            -Database $Database `
+            -ConnectionInfo $ConnectionInfo `
+            -Queries $Queries `
+            -DatabaseInfo $DatabaseInfo `
+            -SessionId $sessionId
+        
+        # Build Find-RemovalSubset parameters
+        $findParams = @{
+            Database       = $Database
+            ConnectionInfo = $ConnectionInfo
+            DatabaseInfo   = $DatabaseInfo
+            SessionId      = $sessionId
+        }
+        
+        if ($MaxBatchSize -gt 0) {
+            $findParams['MaxBatchSize'] = $MaxBatchSize
+        }
+        
+        # Run Find-RemovalSubset
+        $result = Find-RemovalSubset @findParams
+        
+        # Get summary
+        $summary = Get-SubsetSummary `
+            -SessionId $sessionId `
+            -Database $Database `
+            -ConnectionInfo $ConnectionInfo `
+            -DatabaseInfo $DatabaseInfo
+        
+        return [pscustomobject]@{
+            SessionId = $sessionId
+            Result    = $result
+            Summary   = $summary
+            Success   = $true
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            SessionId = $sessionId
+            Result    = $null
+            Summary   = @{}
+            Success   = $false
+            Error     = $_
+        }
+    }
+}
+
+function New-RemovalQuery {
+    <#
+    .SYNOPSIS
+        Creates a Query2 object with InboundOnly state for removal operations.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Schema,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Table,
+        
+        [Parameter(Mandatory = $true)]
+        [string[]]$KeyColumns,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Where = '',
+        
+        [Parameter(Mandatory = $false)]
+        [int]$Top = 0
+    )
+    
+    $query = New-Object Query2
+    $query.State = [TraversalState]::InboundOnly
+    $query.Schema = $Schema
+    $query.Table = $Table
+    $query.KeyColumns = $KeyColumns
+    $query.Where = $Where
+    $query.Top = $Top
+    
+    return $query
+}
