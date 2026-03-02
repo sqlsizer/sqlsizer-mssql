@@ -590,3 +590,109 @@ Describe 'Get-AdditionalWhereConditions' {
         $result[0] | Should -Not -Match "TOP"
     }
 }
+
+Describe 'TraversalRule Convenience Methods' {
+    Context 'Constraint Setting Methods' {
+        It 'SetTop creates constraints and sets Top value' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetTop(50)
+            
+            $rule.Constraints | Should -Not -BeNull
+            $rule.Constraints.Top | Should -Be 50
+        }
+        
+        It 'SetMaxDepth creates constraints and sets MaxDepth value' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetMaxDepth(3)
+            
+            $rule.Constraints | Should -Not -BeNull
+            $rule.Constraints.MaxDepth | Should -Be 3
+        }
+        
+        It 'SetSourceFilter creates constraints and sets source filter' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetSourceFilter('Sales', 'Customers')
+            
+            $rule.Constraints | Should -Not -BeNull
+            $rule.Constraints.SourceSchemaName | Should -Be 'Sales'
+            $rule.Constraints.SourceTableName | Should -Be 'Customers'
+        }
+        
+        It 'SetForeignKeyFilter creates constraints and sets FK filter' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetForeignKeyFilter('FK_Orders_Customers')
+            
+            $rule.Constraints | Should -Not -BeNull
+            $rule.Constraints.ForeignKeyName | Should -Be 'FK_Orders_Customers'
+        }
+        
+        It 'Multiple constraint methods work together' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetTop(100).SetMaxDepth(2).SetSourceFilter('Sales', 'Invoices')
+            
+            $rule.Constraints.Top | Should -Be 100
+            $rule.Constraints.MaxDepth | Should -Be 2
+            $rule.Constraints.SourceSchemaName | Should -Be 'Sales'
+            $rule.Constraints.SourceTableName | Should -Be 'Invoices'
+        }
+        
+        It 'SetStateOverride creates state override and sets state' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $rule.SetStateOverride([TraversalState]::Include)
+            
+            $rule.StateOverride | Should -Not -BeNull
+            $rule.StateOverride.State | Should -Be ([TraversalState]::Include)
+        }
+        
+        It 'Methods return the rule for chaining' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $result = $rule.SetTop(50)
+            
+            $result | Should -Be $rule
+            $rule.Constraints.Top | Should -Be 50
+        }
+    }
+}
+
+Describe 'TraversalConfiguration Convenience Methods' {
+    Context 'Ignored Tables Management' {
+        It 'AddIgnoredTable adds table and returns config for chaining' {
+            $config = New-Object TraversalConfiguration
+            
+            $result = $config.AddIgnoredTable("dbo", "AuditLog")
+            
+            $result | Should -Be $config
+            $config.IgnoredTables.Count | Should -Be 1
+            $config.IgnoredTables[0].SchemaName | Should -Be "dbo"
+            $config.IgnoredTables[0].TableName | Should -Be "AuditLog"
+        }
+        
+        It 'Methods can be chained' {
+            $config = New-Object TraversalConfiguration
+            
+            $config.AddIgnoredTable("dbo", "AuditLog").AddIgnoredTable("dbo", "ErrorLog")
+            
+            $config.IgnoredTables.Count | Should -Be 2
+            $config.IgnoredTables[0].TableName | Should -Be "AuditLog"
+            $config.IgnoredTables[1].TableName | Should -Be "ErrorLog"
+        }
+        
+        It 'AddRule adds rule and returns config for chaining' {
+            $config = New-Object TraversalConfiguration
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            
+            $result = $config.AddRule($rule)
+            
+            $result | Should -Be $config
+            $config.Rules.Count | Should -Be 1
+            $config.Rules[0] | Should -Be $rule
+        }
+    }
+}

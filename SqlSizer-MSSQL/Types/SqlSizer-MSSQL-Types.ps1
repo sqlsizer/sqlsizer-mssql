@@ -555,6 +555,44 @@ class TraversalConfiguration
         $key = "$schema, $table"
         return $this._ruleCache[$key]
     }
+    
+    # Convenience methods for managing ignored tables
+    [TraversalConfiguration] AddIgnoredTable([string]$schema, [string]$table)
+    {
+        $tableInfo = New-Object TableInfo2
+        $tableInfo.SchemaName = $schema
+        $tableInfo.TableName = $table
+        $this.IgnoredTables += $tableInfo
+        return $this
+    }
+    
+    [TraversalConfiguration] RemoveIgnoredTable([string]$schema, [string]$table)
+    {
+        $this.IgnoredTables = $this.IgnoredTables | Where-Object { 
+            $_.SchemaName -ne $schema -or $_.TableName -ne $table 
+        }
+        return $this
+    }
+    
+    [TraversalConfiguration] ClearIgnoredTables()
+    {
+        $this.IgnoredTables = @()
+        return $this
+    }
+    
+    [TraversalConfiguration] SetIgnoredTables([TableInfo2[]]$tables)
+    {
+        $this.IgnoredTables = $tables
+        return $this
+    }
+    
+    # Convenience method for adding rules
+    [TraversalConfiguration] AddRule([TraversalRule]$rule)
+    {
+        $this.Rules += $rule
+        return $this
+    }
+}
 }
 
 
@@ -609,6 +647,59 @@ class TraversalRule
     [TraversalConstraints] GetCondition()
     {
         return $this.Constraints
+    }
+    
+    # Convenience methods for setting constraints
+    [TraversalRule] SetTop([int]$value)
+    {
+        if ($null -eq $this.Constraints)
+        {
+            $this.Constraints = New-Object TraversalConstraints
+        }
+        $this.Constraints.Top = $value
+        return $this
+    }
+    
+    [TraversalRule] SetMaxDepth([int]$value)
+    {
+        if ($null -eq $this.Constraints)
+        {
+            $this.Constraints = New-Object TraversalConstraints
+        }
+        $this.Constraints.MaxDepth = $value
+        return $this
+    }
+    
+    [TraversalRule] SetSourceFilter([string]$schema, [string]$table)
+    {
+        if ($null -eq $this.Constraints)
+        {
+            $this.Constraints = New-Object TraversalConstraints
+        }
+        $this.Constraints.SourceSchemaName = $schema
+        $this.Constraints.SourceTableName = $table
+        return $this
+    }
+    
+    [TraversalRule] SetForeignKeyFilter([string]$fkName)
+    {
+        if ($null -eq $this.Constraints)
+        {
+            $this.Constraints = New-Object TraversalConstraints
+        }
+        $this.Constraints.ForeignKeyName = $fkName
+        return $this
+    }
+    
+    # Convenience methods for setting state override
+    [TraversalRule] SetStateOverride([TraversalState]$state)
+    {
+        if ($null -eq $this.StateOverride)
+        {
+            $this.StateOverride = New-Object StateOverride
+        }
+        $this.StateOverride.State = $state
+        return $this
     }
 }
 

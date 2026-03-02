@@ -37,20 +37,59 @@ foreach ($table in $info.Tables)
     if ($table.TableName -in @('Person'))
     {
         # Use StateOverride instead of ForcedColor for modern configuration
-        $rule.StateOverride = New-Object -Type StateOverride -ArgumentList ([TraversalState]::Pending)
+        $rule.SetStateOverride([TraversalState]::Pending)
     }
 
     # Use TraversalConstraints instead of Condition for modern configuration
-    $rule.Constraints = New-Object -Type TraversalConstraints
-    $rule.Constraints.Top = 10 # limit all dependend data for each fk by 10 rows (it doesn't mean that there will be no more rows!)
-    $config.Rules += $rule
+    # Old way:
+    # $rule.Constraints = New-Object -Type TraversalConstraints
+    # $rule.Constraints.Top = 10
+    
+    # New convenient way:
+    $rule.SetTop(10) # limit all dependent data for each fk by 10 rows (it doesn't mean that there will be no more rows!)
+    $config.AddRule($rule)
 }
 
 # Optionally, configure ignored tables to exclude from traversal (modern alternative to separate IgnoredTables parameter)
-# Example: Ignore audit tables
-# $config.IgnoredTables = @(
-#     New-Object -Type TableInfo2 -Property @{SchemaName="dbo"; TableName="AuditLog"}
-# )
+# Fluent interface example:
+# $config.AddIgnoredTable("dbo", "AuditLog").AddIgnoredTable("dbo", "ErrorLog")
+# Or set multiple at once:
+# $config.SetIgnoredTables(@(
+#     New-Object -Type TableInfo2 -Property @{SchemaName="dbo"; TableName="AuditLog"},
+#     New-Object -Type TableInfo2 -Property @{SchemaName="dbo"; TableName="ErrorLog"}
+# ))
+
+# You can also set constraints on rules easily:
+# $rule.SetMaxDepth(3).SetSourceFilter("Sales", "Orders").SetForeignKeyFilter("FK_OrderDetails_Orders")
+
+# ===== NEW FLUENT API EXAMPLES =====
+# The modern API provides convenience methods and fluent interfaces for easier configuration:
+
+# Example configurations using the new fluent API:
+
+# Example 1: Simple ignored tables
+# $config.AddIgnoredTable("dbo", "AuditLog").AddIgnoredTable("dbo", "ErrorLog")
+
+# Example 2: Complex rule with multiple constraints
+# $rule = New-Object TraversalRule -ArgumentList "Sales", "Orders"
+# $rule.SetStateOverride([TraversalState]::Include).SetTop(100).SetMaxDepth(2)
+# $config.AddRule($rule)
+
+# Example 3: Rule with source filtering
+# $rule = New-Object TraversalRule -ArgumentList "Sales", "OrderDetails" 
+# $rule.SetSourceFilter("Sales", "Orders").SetTop(50)
+# $config.AddRule($rule)
+
+# Example 4: Bulk ignored tables setup
+# $config.SetIgnoredTables(@(
+#     New-Object TableInfo2 -Property @{SchemaName="dbo"; TableName="AuditLog"},
+#     New-Object TableInfo2 -Property @{SchemaName="dbo"; TableName="Settings"}
+# ))
+
+# Example 5: Chained configuration
+# $config.AddIgnoredTable("dbo", "Logs").
+#         AddRule((New-Object TraversalRule -ArgumentList "Sales", "Customers").SetTop(10)).
+#         AddRule((New-Object TraversalRule -ArgumentList "Sales", "Orders").SetMaxDepth(3).SetStateOverride([TraversalState]::Pending))
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 

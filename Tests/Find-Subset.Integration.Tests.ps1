@@ -969,8 +969,6 @@ Describe 'IgnoredTables' {
 }
 
 # =====================================================
-# Algorithm Options Tests
-# =====================================================
 
 Describe 'Algorithm Options' {
     AfterEach {
