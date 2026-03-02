@@ -925,6 +925,47 @@ Describe 'IgnoredTables' {
             Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Settings'
         }
     }
+    
+    Context 'TraversalConfiguration IgnoredTables' {
+        It 'Should not traverse to ignored table via TraversalConfiguration (AuditLog)' {
+            $config = New-Object TraversalConfiguration
+            $config.IgnoredTables = @((Get-TestTableInfo -Schema 'dbo' -Table 'AuditLog'))
+            
+            $query = New-TestQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -TraversalConfiguration $config
+            
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Employees' -MinRows 1
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'AuditLog'
+        }
+        
+        It 'Should ignore multiple tables via TraversalConfiguration' {
+            $config = New-Object TraversalConfiguration
+            $config.IgnoredTables = @(
+                (Get-TestTableInfo -Schema 'dbo' -Table 'AuditLog'),
+                (Get-TestTableInfo -Schema 'dbo' -Table 'Settings')
+            )
+            
+            $query = New-TestQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') -Top 1
+            
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -TraversalConfiguration $config
+            
+            $testResult.Success | Should -Be $true
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'AuditLog'
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Settings'
+        }
+    }
 }
 
 # =====================================================

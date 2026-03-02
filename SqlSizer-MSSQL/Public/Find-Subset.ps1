@@ -119,8 +119,10 @@ function Find-Subset
                 $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Schema } else { $fk.FkSchema }
                 $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Table } else { $fk.FkTable }
 
-                # Skip ignored tables
-                if ([TableInfo2]::IsIgnored($targetSchema, $targetTable, $IgnoredTables))
+                # Skip ignored tables (from both separate parameter and TraversalConfiguration)
+                $isIgnoredFromParam = [TableInfo2]::IsIgnored($targetSchema, $targetTable, $IgnoredTables)
+                $isIgnoredFromConfig = $TraversalConfiguration -and [TableInfo2]::IsIgnored($targetSchema, $targetTable, $TraversalConfiguration.IgnoredTables)
+                if ($isIgnoredFromParam -or $isIgnoredFromConfig)
                 {
                     continue
                 }

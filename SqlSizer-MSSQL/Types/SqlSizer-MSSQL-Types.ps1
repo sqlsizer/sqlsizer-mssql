@@ -509,6 +509,7 @@ class TraversalConfiguration
     .DESCRIPTION
         Allows overriding traversal states and constraints per table or FK.
         Replaces the legacy ColorMap class with clearer naming.
+        Also supports specifying tables to ignore during traversal.
     .EXAMPLE
         $config = New-Object TraversalConfiguration
         $rule = New-Object TraversalRule
@@ -519,8 +520,11 @@ class TraversalConfiguration
         $rule.Constraints = New-Object TraversalConstraints
         $rule.Constraints.MaxDepth = 3
         $config.Rules = @($rule)
+        # Ignore audit tables
+        $config.IgnoredTables = @([TableInfo2]@{SchemaName="dbo"; TableName="AuditLog"})
     #>
     [TraversalRule[]]$Rules
+    [TableInfo2[]]$IgnoredTables
     
     # Internal hashtable cache for O(1) lookups
     hidden [hashtable]$_ruleCache = $null
@@ -528,6 +532,7 @@ class TraversalConfiguration
     TraversalConfiguration()
     {
         $this.Rules = @()
+        $this.IgnoredTables = @()
     }
     
     # Builds internal hashtable cache on first access

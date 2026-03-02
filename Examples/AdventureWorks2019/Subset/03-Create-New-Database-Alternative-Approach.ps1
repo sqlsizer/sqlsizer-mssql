@@ -46,6 +46,12 @@ foreach ($table in $info.Tables)
     $config.Rules += $rule
 }
 
+# Optionally, configure ignored tables to exclude from traversal (modern alternative to separate IgnoredTables parameter)
+# Example: Ignore audit tables
+# $config.IgnoredTables = @(
+#     New-Object -Type TableInfo2 -Property @{SchemaName="dbo"; TableName="AuditLog"}
+# )
+
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
 # Find subset using refactored algorithm with modern TraversalConfiguration
