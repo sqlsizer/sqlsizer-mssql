@@ -15,8 +15,33 @@
     5. Batch processing with set-based operations
     6. CTE-based SQL generation for clarity
 
+.PARAMETER CheckpointPath
+    Path to a JSON file for saving traversal progress. Enables checkpoint/resume for long-running
+    traversals. If the file does not exist, it will be created. Progress is saved every
+    CheckpointInterval iterations.
+
+.PARAMETER CheckpointInterval
+    How often (in iterations) to save a checkpoint. Default: 5.
+
+.PARAMETER Resume
+    Resume a previously interrupted traversal from the last checkpoint. Requires CheckpointPath
+    to point to an existing checkpoint file. Skips Initialize-OperationsTable and recovers
+    the iteration counter from the checkpoint.
+
 .NOTES
     Initialize the start set using Initialize-StartSet before calling this function.
+    For long-running traversals, use -CheckpointPath to enable automatic progress saving.
+    If the process crashes, use -Resume -CheckpointPath to pick up where you left off.
+
+.EXAMPLE
+    # Run with checkpointing
+    Find-Subset -Database "MyDB" -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+        -CheckpointPath "C:\temp\subset_checkpoint.json"
+
+.EXAMPLE
+    # Resume after crash
+    Find-Subset -Database "MyDB" -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+        -CheckpointPath "C:\temp\subset_checkpoint.json" -Resume
 #>
 
 function Find-Subset
@@ -59,7 +84,16 @@ function Find-Subset
         [bool]$UseDfs = $false,
 
         [Parameter(Mandatory = $true)]
-        [SqlConnectionInfo]$ConnectionInfo
+        [SqlConnectionInfo]$ConnectionInfo,
+
+        [Parameter(Mandatory = $false)]
+        [string]$CheckpointPath,
+
+        [Parameter(Mandatory = $false)]
+        [int]$CheckpointInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Resume
     )
 
     # Query caches - keyed by "schema_table_state_direction"
@@ -588,13 +622,77 @@ WHERE SessionId = '$SessionId'
 
     if ($Interactive -eq $false)
     {
-        # Non-interactive mode: run until complete
-        $null = Initialize-OperationsTable `
-            -SessionId $SessionId `
-            -Database $Database `
-            -ConnectionInfo $ConnectionInfo `
-            -DatabaseInfo $DatabaseInfo `
-            -StartIteration $StartIteration
+        if ($Resume)
+        {
+            # Resume from checkpoint
+            if (-not $CheckpointPath)
+            {
+                throw "CheckpointPath is required when using -Resume."
+            }
+            if (-not (Test-Path $CheckpointPath))
+            {
+                throw "Checkpoint file not found: $CheckpointPath"
+            }
+
+            $checkpoint = Get-Content -Path $CheckpointPath -Raw | ConvertFrom-Json
+            if ($checkpoint.Type -ne 'Subset')
+            {
+                throw "Checkpoint type mismatch. Expected 'Subset', found '$($checkpoint.Type)'."
+            }
+            if ($checkpoint.Status -eq 'Completed')
+            {
+                Write-Warning "Checkpoint indicates traversal already completed. Nothing to resume."
+                return [pscustomobject]@{
+                    Finished            = $true
+                    Initialized         = $true
+                    CompletedIterations = 0
+                }
+            }
+            if ($checkpoint.SessionId -ne $SessionId)
+            {
+                throw "SessionId mismatch. Checkpoint is for session '$($checkpoint.SessionId)', but '$SessionId' was provided."
+            }
+
+            $StartIteration = $checkpoint.LastCompletedIteration
+            Write-Verbose "Resuming from iteration $StartIteration (checkpoint: $CheckpointPath)"
+
+            # Reset any abandoned in-progress operations
+            $resetSql = @"
+UPDATE SqlSizer.Operations
+SET Status = NULL, Processed = 0
+WHERE Status = 0 AND SessionId = '$SessionId';
+"@
+            $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo
+        }
+        else
+        {
+            # Normal start: initialize operations
+            $null = Initialize-OperationsTable `
+                -SessionId $SessionId `
+                -Database $Database `
+                -ConnectionInfo $ConnectionInfo `
+                -DatabaseInfo $DatabaseInfo `
+                -StartIteration $StartIteration
+
+            # Write initial checkpoint
+            if ($CheckpointPath)
+            {
+                $initialCheckpoint = [ordered]@{
+                    Type                   = 'Subset'
+                    SessionId              = $SessionId
+                    Database               = $Database
+                    LastCompletedIteration = $StartIteration
+                    FullSearch             = $FullSearch
+                    UseDfs                 = $UseDfs
+                    MaxBatchSize           = $MaxBatchSize
+                    Status                 = 'InProgress'
+                    CreatedAt              = (Get-Date).ToString('o')
+                    UpdatedAt              = (Get-Date).ToString('o')
+                }
+                $initialCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+                Write-Verbose "Checkpoint created: $CheckpointPath"
+            }
+        }
 
         $startTime = Get-Date
         $iteration = $StartIteration + 1
@@ -604,17 +702,53 @@ WHERE SessionId = '$SessionId'
         {
             $hasMoreWork = Invoke-SearchIteration -Iteration $iteration
 
-            # Update progress
-            if (($iteration % 5) -eq 0)
+            # Update progress and checkpoint
+            if (($iteration % $CheckpointInterval) -eq 0)
             {
                 $stats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
                 $script:percentComplete = $stats.PercentComplete()
                 Write-Verbose $stats.ToString()
+
+                if ($CheckpointPath)
+                {
+                    $iterationCheckpoint = [ordered]@{
+                        Type                   = 'Subset'
+                        SessionId              = $SessionId
+                        Database               = $Database
+                        LastCompletedIteration = $iteration
+                        FullSearch             = $FullSearch
+                        UseDfs                 = $UseDfs
+                        MaxBatchSize           = $MaxBatchSize
+                        Status                 = 'InProgress'
+                        CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
+                        UpdatedAt              = (Get-Date).ToString('o')
+                    }
+                    $iterationCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+                }
             }
 
             $iteration++
         }
         while ($hasMoreWork)
+
+        # Write final checkpoint
+        if ($CheckpointPath)
+        {
+            $finalCheckpoint = [ordered]@{
+                Type                   = 'Subset'
+                SessionId              = $SessionId
+                Database               = $Database
+                LastCompletedIteration = $iteration
+                FullSearch             = $FullSearch
+                UseDfs                 = $UseDfs
+                MaxBatchSize           = $MaxBatchSize
+                Status                 = 'Completed'
+                CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
+                UpdatedAt              = (Get-Date).ToString('o')
+            }
+            $finalCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+            Write-Verbose "Traversal completed. Final checkpoint saved to $CheckpointPath"
+        }
 
         Write-Progress -Activity "Finding subset" -Completed
 

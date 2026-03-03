@@ -40,9 +40,31 @@
 .PARAMETER MaxBatchSize
     Maximum number of rows to process per batch (default: -1 = unlimited).
 
+.PARAMETER CheckpointPath
+    Path to a JSON file for saving traversal progress. Enables checkpoint/resume for long-running
+    traversals. If the file does not exist, it will be created. Progress is saved every
+    CheckpointInterval iterations.
+
+.PARAMETER CheckpointInterval
+    How often (in iterations) to save a checkpoint. Default: 5.
+
+.PARAMETER Resume
+    Resume a previously interrupted traversal from the last checkpoint. Requires CheckpointPath
+    to point to an existing checkpoint file.
+
 .EXAMPLE
     Find-RemovalSubset -SessionId "session1" -Database "MyDB" `
         -DatabaseInfo $dbInfo -ConnectionInfo $connInfo
+
+.EXAMPLE
+    # Run with checkpointing
+    Find-RemovalSubset -SessionId $sid -Database "MyDB" -DatabaseInfo $info -ConnectionInfo $conn `
+        -CheckpointPath "C:\temp\removal_checkpoint.json"
+
+.EXAMPLE
+    # Resume after crash
+    Find-RemovalSubset -SessionId $sid -Database "MyDB" -DatabaseInfo $info -ConnectionInfo $conn `
+        -CheckpointPath "C:\temp\removal_checkpoint.json" -Resume
 
 .NOTES
     Initialize the start set using Initialize-StartSet before calling this function.
@@ -78,7 +100,16 @@ function Find-RemovalSubset
         [DatabaseInfo]$DatabaseInfo,
 
         [Parameter(Mandatory = $true)]
-        [SqlConnectionInfo]$ConnectionInfo
+        [SqlConnectionInfo]$ConnectionInfo,
+
+        [Parameter(Mandatory = $false)]
+        [string]$CheckpointPath,
+
+        [Parameter(Mandatory = $false)]
+        [int]$CheckpointInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Resume
     )
 
     # Query cache for FK traversal patterns - keyed by "schema_table_color"
@@ -530,13 +561,75 @@ WHERE [Status] = 0
 
     if ($false -eq $Interactive)
     {
-        # Non-interactive mode: run until completion
-        $null = Initialize-OperationsTable `
-            -SessionId $SessionId `
-            -Database $Database `
-            -ConnectionInfo $ConnectionInfo `
-            -DatabaseInfo $DatabaseInfo `
-            -StartIteration $StartIteration
+        if ($Resume)
+        {
+            # Resume from checkpoint
+            if (-not $CheckpointPath)
+            {
+                throw "CheckpointPath is required when using -Resume."
+            }
+            if (-not (Test-Path $CheckpointPath))
+            {
+                throw "Checkpoint file not found: $CheckpointPath"
+            }
+
+            $checkpoint = Get-Content -Path $CheckpointPath -Raw | ConvertFrom-Json
+            if ($checkpoint.Type -ne 'RemovalSubset')
+            {
+                throw "Checkpoint type mismatch. Expected 'RemovalSubset', found '$($checkpoint.Type)'."
+            }
+            if ($checkpoint.Status -eq 'Completed')
+            {
+                Write-Warning "Checkpoint indicates traversal already completed. Nothing to resume."
+                return [pscustomobject]@{
+                    Finished            = $true
+                    Initialized         = $true
+                    CompletedIterations = 0
+                }
+            }
+            if ($checkpoint.SessionId -ne $SessionId)
+            {
+                throw "SessionId mismatch. Checkpoint is for session '$($checkpoint.SessionId)', but '$SessionId' was provided."
+            }
+
+            $StartIteration = $checkpoint.LastCompletedIteration
+            Write-Verbose "Resuming from iteration $StartIteration (checkpoint: $CheckpointPath)"
+
+            # Reset any abandoned in-progress operations
+            $resetSql = @"
+UPDATE SqlSizer.Operations
+SET Status = NULL, Processed = 0
+WHERE Status = 0 AND SessionId = '$SessionId';
+"@
+            $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo
+        }
+        else
+        {
+            # Normal start: initialize operations
+            $null = Initialize-OperationsTable `
+                -SessionId $SessionId `
+                -Database $Database `
+                -ConnectionInfo $ConnectionInfo `
+                -DatabaseInfo $DatabaseInfo `
+                -StartIteration $StartIteration
+
+            # Write initial checkpoint
+            if ($CheckpointPath)
+            {
+                $initialCheckpoint = [ordered]@{
+                    Type                   = 'RemovalSubset'
+                    SessionId              = $SessionId
+                    Database               = $Database
+                    LastCompletedIteration = $StartIteration
+                    MaxBatchSize           = $MaxBatchSize
+                    Status                 = 'InProgress'
+                    CreatedAt              = (Get-Date).ToString('o')
+                    UpdatedAt              = (Get-Date).ToString('o')
+                }
+                $initialCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+                Write-Verbose "Checkpoint created: $CheckpointPath"
+            }
+        }
 
         $startTime = Get-Date
         $lastProgressTime = 0
@@ -550,10 +643,43 @@ WHERE [Status] = 0
                 -Iteration $currentIteration `
                 -StartTime $startTime `
                 -LastProgressTime ([ref]$lastProgressTime)
-            
+
+            # Save checkpoint periodically
+            if ($CheckpointPath -and (($currentIteration % $CheckpointInterval) -eq 0))
+            {
+                $iterationCheckpoint = [ordered]@{
+                    Type                   = 'RemovalSubset'
+                    SessionId              = $SessionId
+                    Database               = $Database
+                    LastCompletedIteration = $currentIteration
+                    MaxBatchSize           = $MaxBatchSize
+                    Status                 = 'InProgress'
+                    CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
+                    UpdatedAt              = (Get-Date).ToString('o')
+                }
+                $iterationCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+            }
+
             $currentIteration++
         }
         while ($hasMore -eq $true)
+
+        # Write final checkpoint
+        if ($CheckpointPath)
+        {
+            $finalCheckpoint = [ordered]@{
+                Type                   = 'RemovalSubset'
+                SessionId              = $SessionId
+                Database               = $Database
+                LastCompletedIteration = $currentIteration
+                MaxBatchSize           = $MaxBatchSize
+                Status                 = 'Completed'
+                CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
+                UpdatedAt              = (Get-Date).ToString('o')
+            }
+            $finalCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+            Write-Verbose "Traversal completed. Final checkpoint saved to $CheckpointPath"
+        }
 
         Write-Progress -Activity "Finding removal subset $SessionId" -Completed
 
