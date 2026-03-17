@@ -9,15 +9,23 @@
 1. [Quick Start (5-Minute Guide)](#quick-start-5-minute-guide)
 2. [Overview](#overview)
 3. [Core Concepts](#core-concepts)
-4. [Architecture](#architecture)
-5. [The Subset Algorithm](#the-subset-algorithm)
-6. [Data Structures](#data-structures)
-7. [Session Management](#session-management)
-8. [Common Scenarios](#common-scenarios)
-9. [Workflow Examples](#workflow-examples)
-10. [Performance Considerations](#performance-considerations)
-11. [Troubleshooting](#troubleshooting)
-12. [Glossary](#glossary)
+4. [Traversal Configuration](#traversal-configuration)
+5. [Architecture](#architecture)
+6. [Database Schema Internals](#database-schema-internals)
+7. [The Subset Algorithm](#the-subset-algorithm)
+8. [The Removal Algorithm](#the-removal-algorithm)
+9. [SQL Generation (CTE-Based)](#sql-generation-cte-based)
+10. [Data Structures](#data-structures)
+11. [Session Management](#session-management)
+12. [Checkpoint & Resume](#checkpoint--resume)
+13. [Advanced Features](#advanced-features)
+14. [Common Scenarios](#common-scenarios)
+15. [Workflow Examples](#workflow-examples)
+16. [Copy-Database](#copy-database)
+17. [Azure SQL Support](#azure-sql-support)
+18. [Performance Considerations](#performance-considerations)
+19. [Troubleshooting](#troubleshooting)
+20. [Glossary](#glossary)
 
 ---
 
@@ -154,11 +162,11 @@ Every record discovered during subset search is assigned a **TraversalState** th
 
 | State | Code | When Used | FK Traversal | Final Outcome |
 |-------|------|-----------|--------------|---------------|
-| **Include** | `[TraversalState]::Include` | Must be in subset | Outgoing + Incoming (if FullSearch) | ✅ In subset |
-| **Exclude** | `[TraversalState]::Exclude` | Must NOT be in subset | None - stops here | ❌ Not in subset |
+| **Include** | `[TraversalState]::Include` | Must be in subset | Outgoing + Incoming (if FullSearch) | In subset |
+| **Exclude** | `[TraversalState]::Exclude` | Must NOT be in subset | None - stops here | Not in subset |
 | **Pending** | `[TraversalState]::Pending` | Discovered via incoming FKs (non-full search) | Outgoing only | Promoted to Include during traversal if reachable via Include path, otherwise Exclude |
 | **InboundOnly** | `[TraversalState]::InboundOnly` | For removal operations | Incoming only | Finds dependents |
-| **IncludeFull** | `[TraversalState]::IncludeFull` | Force incoming traversal for specific records | Outgoing + Incoming (always) | ✅ In subset |
+| **IncludeFull** | `[TraversalState]::IncludeFull` | Force incoming traversal for specific records | Outgoing + Incoming (always) | In subset |
 
 ### Traversal Directions
 
@@ -198,18 +206,149 @@ Foreign key relationships can be traversed in two directions, each answering dif
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Complete State Transition Table
+
+The function `Get-NewTraversalState` in `TraversalHelpers.ps1` implements these rules:
+
+| Current State | Direction | FullSearch | New State | Explanation |
+|---------------|-----------|------------|-----------|-------------|
+| **Include** | Outgoing | - | Include | Referenced data must be included |
+| **Include** | Incoming | `$false` | Pending | Dependents discovered but not yet confirmed |
+| **Include** | Incoming | `$true` | Include | Full closure: include all dependents |
+| **IncludeFull** | Outgoing | - | Include | Follow dependencies normally |
+| **IncludeFull** | Incoming | - | Include | Always include dependents (per-record full search) |
+| **Pending** | Outgoing | - | Pending | Propagate uncertainty to dependencies |
+| **Pending** | Incoming | - | *(no traverse)* | Don't explore further from uncertain records |
+| **Exclude** | Outgoing | - | *(no traverse)* | Exclusion stops all traversal |
+| **Exclude** | Incoming | - | *(no traverse)* | Exclusion stops all traversal |
+| **InboundOnly** | Outgoing | - | *(no traverse)* | Removal mode: only finds dependents |
+| **InboundOnly** | Incoming | - | InboundOnly | Continue finding dependents |
+
+The function `Test-ShouldTraverseDirection` controls whether traversal even occurs for a given State+Direction combination before `Get-NewTraversalState` is called.
+
 ### FullSearch Mode
 
 The `FullSearch` parameter controls which directions are followed:
 
 | Parameter | Outgoing FKs | Incoming FKs | Use Case |
 |-----------|--------------|--------------|----------|
-| `$false` (default) | ✅ Yes | ❌ No | Finding dependencies of seed records |
-| `$true` | ✅ Yes | ✅ Yes | Finding complete data closure (both directions) |
+| `$false` (default) | Yes | No | Finding dependencies of seed records |
+| `$true` | Yes | Yes | Finding complete data closure (both directions) |
 
 **When to use FullSearch:**
 - `$false` - "Give me this Customer and everything they need" (Orders, Products referenced)
 - `$true` - "Give me this Customer and everything connected" (includes their Orders, OrderItems, etc.)
+
+---
+
+## Traversal Configuration
+
+`TraversalConfiguration` lets you customize traversal behavior per table, overriding the default state transitions and adding constraints.
+
+### Creating a Configuration
+
+```powershell
+$config = New-Object TraversalConfiguration
+
+# Add a rule for a specific table
+$rule = New-Object TraversalRule
+$rule.SchemaName = "Sales"
+$rule.TableName = "AuditLog"
+$rule.StateOverride = New-Object StateOverride
+$rule.StateOverride.State = [TraversalState]::Exclude  # Never include audit logs
+$config.Rules = @($rule)
+
+# Pass to Find-Subset
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -TraversalConfiguration $config
+```
+
+### StateOverride
+
+Forces a specific `TraversalState` for any records discovered in a table, regardless of the normal transition rules:
+
+```powershell
+# Force all Product records to be included
+$rule = New-Object TraversalRule
+$rule.SchemaName = "Production"
+$rule.TableName = "Product"
+$rule.StateOverride = [StateOverride]::new([TraversalState]::Include)
+```
+
+### TraversalConstraints
+
+Limits how far or how much the traversal explores for a specific table:
+
+```powershell
+$rule = New-Object TraversalRule
+$rule.SchemaName = "Sales"
+$rule.TableName = "OrderHistory"
+$rule.Constraints = New-Object TraversalConstraints
+$rule.Constraints.MaxDepth = 3          # Stop after 3 hops from this table
+$rule.Constraints.Top = 1000            # Max 1000 rows discovered for this table
+```
+
+Available constraints:
+
+| Constraint | Default | Description |
+|------------|---------|-------------|
+| `MaxDepth` | `-1` (unlimited) | Stop traversal after N hops from source |
+| `Top` | `-1` (unlimited) | Limit discovered rows to N |
+| `SourceSchemaName` + `SourceTableName` | `""` (any) | Only process when source matches |
+| `ForeignKeyName` | `""` (any) | Only process via this specific FK |
+
+### Fluent API
+
+`TraversalRule` supports a fluent builder pattern:
+
+```powershell
+$rule = [TraversalRule]::new("Sales", "OrderHistory")
+$rule.SetStateOverride([TraversalState]::Include).SetMaxDepth(3).SetTop(1000)
+```
+
+### Ignored Tables
+
+Skip entire tables during traversal (they won't be discovered at all):
+
+```powershell
+$config = New-Object TraversalConfiguration
+$config.AddIgnoredTable("dbo", "AuditLog")
+$config.AddIgnoredTable("dbo", "ChangeTracking")
+
+# Or set all at once
+$config.IgnoredTables = @(
+    [TableInfo2]@{ SchemaName = "dbo"; TableName = "AuditLog" },
+    [TableInfo2]@{ SchemaName = "dbo"; TableName = "ChangeTracking" }
+)
+```
+
+### Practical Examples
+
+**Limit traversal depth on a high-fanout table:**
+```powershell
+# Don't follow more than 2 levels deep from ProductCategory
+$rule = [TraversalRule]::new("Production", "ProductCategory")
+$rule.SetMaxDepth(2)
+$config.AddRule($rule)
+```
+
+**Exclude lookup/reference tables:**
+```powershell
+# Force exclude for lookup tables that don't need subsetting
+foreach ($table in @("CountryCode", "CurrencyCode", "StatusType")) {
+    $rule = [TraversalRule]::new("dbo", $table)
+    $rule.SetStateOverride([TraversalState]::Exclude)
+    $config.AddRule($rule)
+}
+```
+
+**Cap rows on large tables:**
+```powershell
+# Only include up to 500 log entries
+$rule = [TraversalRule]::new("dbo", "EventLog")
+$rule.SetTop(500)
+$config.AddRule($rule)
+```
 
 ---
 
@@ -220,18 +359,24 @@ The `FullSearch` parameter controls which directions are followed:
 ```
 SqlSizer-MSSQL/
 ├── SqlSizer-MSSQL.psm1      # Module loader
-├── SqlSizer-MSSQL.psd1      # Module manifest
-├── Public/                   # 90+ exported cmdlets
-│   ├── Find-Subset.ps1           # Core algorithm
+├── SqlSizer-MSSQL.psd1      # Module manifest (v2.0.2)
+├── Public/                   # 100+ exported cmdlets
+│   ├── Find-Subset.ps1           # Core subset algorithm
 │   ├── Find-RemovalSubset.ps1    # Deletion dependency finder
 │   ├── Initialize-StartSet.ps1   # Seed record setup
 │   ├── Get-SubsetTables.ps1      # Result retrieval
 │   ├── Copy-DataFromSubset.ps1   # Data export
+│   ├── Copy-Database.ps1         # Full database clone (backup/restore)
+│   ├── Install-SqlSizerCore.ps1  # Schema installation
+│   ├── Install-SqlSizerSessionTables.ps1  # Session table creation
+│   ├── Resume-Subset.ps1         # Checkpoint resume
 │   └── ... (other cmdlets)
-├── Shared/                   # Internal helpers
-│   └── Get-ColumnValue.ps1       # Value handling utilities
+├── Shared/                   # Internal helper modules
+│   ├── QueryBuilders.ps1         # CTE-based SQL query generation
+│   ├── TraversalHelpers.ps1      # State transition & constraint logic
+│   └── ValidationHelpers.ps1     # Input validation functions
 └── Types/                    # Type definitions
-    └── SqlSizer-MSSQL-Types.ps1  # Classes and enums
+    └── SqlSizer-MSSQL-Types.ps1  # Classes, enums, and data structures
 ```
 
 ### Data Flow Through Components
@@ -260,8 +405,8 @@ SqlSizer-MSSQL/
 │  │  STEP 2: DEFINE SEED RECORDS                                    │   │
 │  ├─────────────────────────────────────────────────────────────────┤   │
 │  │                                                                  │   │
-│  │  SqlSizerQuery object(s) ─────► Initialize-StartSet                    │   │
-│  │   • State (Include/Exclude/Pending)                             │   │
+│  │  SqlSizerQuery object(s) ─────► Initialize-StartSet             │   │
+│  │   • State (Include/Exclude/Pending/IncludeFull)                 │   │
 │  │   • Schema + Table                                               │   │
 │  │   • Where clause                                                 │   │
 │  │   • Top N limit                                                  │   │
@@ -277,6 +422,7 @@ SqlSizer-MSSQL/
 │  │   • Follows FK relationships                                    │   │
 │  │   • Populates processing tables                                 │   │
 │  │   • Resolves Pending states                                     │   │
+│  │   • Optional: checkpoint progress to JSON file                  │   │
 │  │                                                                  │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                              │                                          │
@@ -289,6 +435,7 @@ SqlSizer-MSSQL/
 │  │  Get-SubsetTableRows ──► Actual row data                        │   │
 │  │  Copy-DataFromSubset ──► Export to target database              │   │
 │  │  Get-SubsetTableJson ──► Export as JSON                         │   │
+│  │  Get-SubsetTableCsv ──► Export as CSV                           │   │
 │  │                                                                  │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                              │                                          │
@@ -310,25 +457,145 @@ For each table with a primary key, SqlSizer creates a **processing table** to tr
 
 ```sql
 -- Created in schema: SqlSizer_{SessionId}
--- One table per source table: {SchemaName}_{TableName}
+-- Named: {SchemaName}_{TableName}
 
 CREATE TABLE SqlSizer_abc123.Sales_Customer (
-    Key0 INT,           -- First PK column value
-    Key1 VARCHAR(50),   -- Second PK column value (if composite)
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Key0 INT NOT NULL,           -- First PK column value
+    Key1 VARCHAR(50) NOT NULL,   -- Second PK column value (if composite)
     -- ... more KeyN columns for larger PKs
-    
-    Color INT,          -- TraversalState (1=Include, 2=Exclude, 3=Pending, 4=InboundOnly, 5=IncludeFull)
-    SourceKey0 INT,     -- Source record that led to this one
-    Depth INT,          -- Hops from seed records
-    FkId INT,           -- Which FK relationship was followed
-    Iteration INT       -- When this was discovered
+
+    [State] TINYINT NOT NULL,    -- TraversalState (1=Include, 2=Exclude, 3=Pending, 4=InboundOnly, 5=IncludeFull)
+    [Source] SMALLINT NULL,      -- SqlSizer.Tables.Id of the table that led here
+    [Depth] SMALLINT NOT NULL,   -- Hops from seed records
+    [Fk] SMALLINT,               -- SqlSizer.ForeignKeys.Id that was followed
+    [Iteration] INT NOT NULL     -- When this record was discovered
 );
+
+-- Indexes (for subset mode):
+CREATE NONCLUSTERED INDEX [Index]   ON ... (Key0, Key1, ..., [State] ASC)
+CREATE NONCLUSTERED INDEX [Index_2] ON ... ([Iteration]) INCLUDE ([Depth], [Fk])
+
+-- Indexes (for removal mode):
+CREATE NONCLUSTERED INDEX [Index]   ON ... (Key0, Key1, ..., [Depth] ASC)
 ```
 
 This design enables:
 - **Server-side processing**: Heavy lifting done in SQL Server
 - **No record duplication**: Each record tracked once regardless of paths
-- **Audit trail**: Know how each record was discovered
+- **Audit trail**: Know how each record was discovered (Source, Fk, Depth, Iteration)
+
+### Structure and Signature System
+
+The `Structure` class maps each table to a **signature** (its `SchemaName_TableName`) and uses signatures to generate processing table names:
+
+```
+Table: Sales.Customer  →  Signature: "Sales_Customer"
+                       →  Processing: SqlSizer_{SessionId}.Sales_Customer
+
+Table: dbo.Product     →  Signature: "dbo_Product"
+                       →  Processing: SqlSizer_{SessionId}.dbo_Product
+```
+
+Tables starting with `SqlSizer` or lacking a primary key are excluded from processing.
+
+---
+
+## Database Schema Internals
+
+SqlSizer creates three schema categories in the target database:
+
+### `SqlSizer` Schema (Core Infrastructure)
+
+Created by `Install-SqlSizerCore`. Contains metadata that persists across sessions:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  SqlSizer Schema                                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  SqlSizer.Tables                                                       │
+│  ├── Id (int, identity, PK)                                            │
+│  ├── [Schema] (varchar 128)     ── indexed                             │
+│  └── TableName (varchar 128)    ── indexed                             │
+│                                                                         │
+│  SqlSizer.ForeignKeys                                                  │
+│  ├── Id (int, identity, PK)                                            │
+│  ├── FkTableId (int)            ── references Tables.Id (FK source)    │
+│  ├── TableId (int)              ── references Tables.Id (FK target)    │
+│  └── Name (varchar 256)         ── FK constraint name                  │
+│                                                                         │
+│  SqlSizer.Operations                                                   │
+│  ├── Id (int, identity, PK)                                            │
+│  ├── [Table] (smallint)         ── references Tables.Id                │
+│  ├── [State] (int)              ── TraversalState enum value           │
+│  ├── ToProcess (int)            ── rows to process in this operation   │
+│  ├── Processed (int)            ── rows already processed              │
+│  ├── Status (int, nullable)     ── NULL=pending, 0=in-progress, 1=done│
+│  ├── Source (int)               ── Tables.Id that created this op      │
+│  ├── Fk (int)                   ── ForeignKeys.Id used                 │
+│  ├── Depth (int)                ── distance from seed records          │
+│  ├── Created (datetime)                                                │
+│  ├── ProcessedDate (datetime)                                          │
+│  ├── SessionId (varchar 256)    ── session isolation                   │
+│  ├── FoundIteration (int)       ── iteration when operation was created│
+│  └── ProcessedIteration (int)   ── iteration when completed           │
+│  Index: ([Table], [State], [Source], [Depth])                          │
+│                                                                         │
+│  SqlSizer.Sessions                                                     │
+│  ├── Id (int, identity, PK)                                            │
+│  └── SessionId (varchar 256)    ── active session registry             │
+│                                                                         │
+│  SqlSizer.Settings                                                     │
+│  ├── Id (int, identity, PK)                                            │
+│  ├── Name (varchar 128)         ── e.g., "Version"                     │
+│  └── Value (varchar 256)        ── e.g., "2.0.2"                       │
+│                                                                         │
+│  SqlSizer.Files                                                        │
+│  ├── Id (int, identity, PK)                                            │
+│  ├── FileId (uniqueidentifier)  ── groups file chunks                  │
+│  ├── [Index] (int)              ── chunk order                         │
+│  └── Content (nvarchar max)     ── file content chunk                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### `SqlSizer_{SessionId}` Schema (Session-Specific)
+
+Created by `Install-SqlSizerSessionTables`. Contains one processing table per source table with a primary key. Isolated per session—multiple concurrent sessions don't interfere.
+
+### `SqlSizerHistory` Schema (Subset History)
+
+Persists across sessions for tracking historical subset operations:
+
+```sql
+SqlSizerHistory.Subset
+├── Id (int, identity, PK)
+├── Guid (uniqueidentifier)
+├── Name (varchar 256)
+└── Created (datetime, default GETDATE())
+
+SqlSizerHistory.SubsetTable
+├── Id (int, identity, PK)
+├── SchemaName (varchar 256)
+├── TableName (varchar 256)
+├── PrimaryKeySize (int)
+├── RowCount (int)
+└── SubsetId (int, FK → Subset.Id, CASCADE DELETE)
+```
+
+### Operations Table: The Work Queue
+
+The `SqlSizer.Operations` table is the central work queue driving both `Find-Subset` and `Find-RemovalSubset`. Each row represents a unit of work: "process N rows from table T at depth D with state S."
+
+**Status lifecycle:**
+
+```
+NULL (pending) → 0 (in-progress) → 1 (completed)
+                     │
+                     └─ If batch limit hit and not all rows processed:
+                        reset back to NULL for re-queuing
+```
 
 ---
 
@@ -369,6 +636,7 @@ This design enables:
 | 1 | `Start-SqlSizerSession` | Creates `SqlSizer_{SessionId}` schema with processing tables |
 | 2 | `Get-DatabaseInfo` | Extracts complete metadata (tables, columns, FKs, indexes) |
 | 3 | `Initialize-StartSet` | Inserts seed records with initial states |
+| 4 | `Initialize-OperationsTable` | Counts rows per (Table, State) and creates initial Operations entries |
 
 ```powershell
 # Example: Start with 10 customers named 'John'
@@ -428,24 +696,45 @@ The algorithm uses **Breadth-First Search (BFS)** by default, or optionally **De
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Algorithm Loop:**
+**Algorithm Loop (Pseudocode):**
 
 ```
-WHILE unprocessed records exist:
-    1. SELECT next operation (table + state + depth)
-    2. FOR EACH foreign key relationship:
-        a. GENERATE CTE query
-        b. EXECUTE query to find related records
-        c. INSERT newly discovered records (skip duplicates)
-    3. MARK records as processed
-    4. INCREMENT iteration counter
+Build hashtable lookups for tables, FKs (O(1) access)
+Initialize query cache (empty)
+
+WHILE unprocessed operations exist:
+    1. Get-NextOperation: SELECT TOP 1 from Operations
+       - BFS: ORDER BY Depth ASC, RemainingRecords DESC
+       - DFS: ORDER BY RemainingRecords DESC
+
+    2. Set-OperationInProgress: Mark Status = 0, advance Processed count
+
+    3. Invoke-TraversalOperation:
+       a. Test-ShouldTraverseDirection for outgoing
+       b. Test-ShouldTraverseDirection for incoming
+       c. For each direction enabled:
+          - Check query cache (key: "schema_table_state_direction")
+          - If miss: generate CTE queries for all FKs
+          - Batch all FK queries into single SQL execution
+       d. Execute batched SQL (reduces round-trips)
+
+    4. Complete-Operations:
+       - If batch fully processed: Status → 1 (complete)
+       - If batch limit hit: Status → NULL (re-queue)
+
+    5. Resolve-PendingStates (only for Include state, non-FullSearch):
+       - UPDATE all remaining Pending → Exclude in processing tables
+
+    6. Save checkpoint (every CheckpointInterval iterations)
+
+    7. Increment iteration counter
 ```
 
 **BFS vs DFS:**
-| Algorithm | Parameter | Behavior | Best For |
-|-----------|-----------|----------|----------|
-| **BFS** | `UseDfs = $false` | Processes all records at depth N before depth N+1 | Even discovery, predictable |
-| **DFS** | `UseDfs = $true` | Follows one path deeply before backtracking | Memory efficiency, early results |
+| Algorithm | Parameter | `ORDER BY` | Best For |
+|-----------|-----------|------------|----------|
+| **BFS** | `UseDfs = $false` | `Depth ASC, RemainingRecords DESC` | Even discovery, predictable progress |
+| **DFS** | `UseDfs = $true` | `RemainingRecords DESC` | Early results, deep narrow graphs |
 
 ### Phase 3: State Resolution
 
@@ -456,7 +745,7 @@ After traversal, any remaining **Pending** records are marked as **Exclude**:
 │                     PENDING STATE HANDLING                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│   DURING TRAVERSAL (handled automatically):                            │
+│   DURING TRAVERSAL (handled automatically in CTE queries):             │
 │   ┌─────────┐                                                          │
 │   │ Include │                                                          │
 │   └────┬────┘                                                          │
@@ -476,60 +765,221 @@ After traversal, any remaining **Pending** records are marked as **Exclude**:
 │   - Any remaining Pending records → marked as Exclude                  │
 │   - These are orphaned dependents not reachable via Include paths     │
 │                                                                         │
-│   ┌─────────┐                                                          │
-│   │ Exclude │ (was Pending, never connected to Include)                │
-│   └─────────┘                                                          │
-│                                                                         │
 │   KEY INSIGHT:                                                          │
 │   Pending→Include promotion happens DURING traversal, not after.       │
-│   When a record already exists as Pending and is discovered again via  │
-│   an Include path, it is immediately promoted to Include.              │
+│   When the CTE INSERT finds a record already exists as Pending,        │
+│   and the new discovery is via Include path, it immediately            │
+│   executes an UPDATE to promote the record's State to Include.         │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### SQL Generation (CTE-Based)
+---
 
-The algorithm generates efficient **Common Table Expression (CTE)** queries for each traversal:
+## The Removal Algorithm
 
-```sql
--- Example: Find Customers referenced by Orders (outgoing FK traversal)
-WITH SourceRecords AS (
-    -- Get unprocessed Order records marked Include at current iteration
-    SELECT Key0, Key1 
-    FROM SqlSizer_Session123.Sales_Order
-    WHERE Color = 1          -- Include state
-      AND Iteration = 5      -- Current iteration
-),
-TargetRecords AS (
-    -- Find referenced Customer records
-    SELECT 
-        c.CustomerID AS Key0,
-        1 AS Color,           -- Include state for new records
-        s.Key0 AS SourceKey0, -- Trace back to source
-        6 AS Depth,           -- One deeper than source
-        42 AS FkId,           -- FK constraint ID
-        6 AS Iteration        -- Current iteration
-    FROM Sales.Customer c
-    INNER JOIN Sales.Order o 
-        ON o.CustomerID = c.CustomerID
-    INNER JOIN SourceRecords s 
-        ON s.Key0 = o.OrderID
-    WHERE NOT EXISTS (
-        -- Skip already-discovered records
-        SELECT 1 
-        FROM SqlSizer_Session123.Sales_Customer t
-        WHERE t.Key0 = c.CustomerID
-    )
-)
-INSERT INTO SqlSizer_Session123.Sales_Customer
-SELECT * FROM TargetRecords;
+`Find-RemovalSubset` solves a different problem: **given records you want to delete, what other records must be deleted first to maintain referential integrity?**
+
+### How It Differs from Find-Subset
+
+| Aspect | Find-Subset | Find-RemovalSubset |
+|--------|-------------|-------------------|
+| **Direction** | Outgoing + optionally Incoming | Incoming only |
+| **Purpose** | Build a consistent subset | Find deletion dependencies |
+| **Starting state** | Usually Include | Usually InboundOnly |
+| **Configuration** | TraversalConfiguration supported | No configuration (simpler) |
+| **Result usage** | Copy/export discovered rows | Delete discovered rows in order |
+
+### Algorithm Walkthrough
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    REMOVAL ALGORITHM                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Target: Delete Customer #123                                         │
+│                                                                         │
+│   Depth 0: Customer #123 (seed)                                        │
+│            │                                                            │
+│            │ incoming FK: Order.CustomerID → Customer.CustomerID       │
+│            ▼                                                            │
+│   Depth 1: Order #A, Order #B                                          │
+│            │                                                            │
+│            │ incoming FK: OrderItem.OrderID → Order.OrderID            │
+│            ▼                                                            │
+│   Depth 2: OrderItem #1, #2, #3, #4                                   │
+│            │                                                            │
+│            │ incoming FK: Review.OrderItemID → OrderItem.OrderItemID   │
+│            ▼                                                            │
+│   Depth 3: Review #X, #Y                                              │
+│                                                                         │
+│   DELETION ORDER (reverse of discovery):                                │
+│   1. Delete Reviews (Depth 3)                                          │
+│   2. Delete OrderItems (Depth 2)                                       │
+│   3. Delete Orders (Depth 1)                                           │
+│   4. Delete Customer (Depth 0)                                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Why CTEs?**
-- Readable and maintainable SQL
-- Optimizable by SQL Server query planner
-- Clear separation of source selection and target insertion
+**Algorithm loop:**
+
+```
+WHILE unprocessed operations exist:
+    1. Get-NextOperation:
+       ORDER BY Depth ASC, Count DESC  (always BFS)
+
+    2. Update-OperationStatus: Mark as in-progress
+
+    3. Invoke-IncomingTraversal:
+       For each table that references the current table:
+         For each FK pointing to the current table:
+           - Build CTE query (with template caching via ##DEPTH## placeholders)
+           - Find all rows in FK source table that reference discovered rows
+           - INSERT into FK source's processing table
+           - CREATE new operation entry for next iteration
+
+    4. Complete-ProcessedOperations:
+       - Fully processed → Status = 1
+       - Partially processed (batch limit) → Status = NULL
+```
+
+**Key differences in implementation:**
+- Uses `##DEPTH##` and `##ITERATION##` placeholders in cached queries (replaced at execution time)
+- Each FK query is executed individually (not batched like Find-Subset)
+- No Pending state resolution needed (no outgoing traversal = no Pending states)
+
+### Using Removal Results
+
+```powershell
+# After Find-RemovalSubset completes:
+
+# Preview what will be deleted
+Get-SubsetTables -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn | Format-Table
+
+# Delete in correct FK order (deepest first)
+Remove-FoundSubsetFromDatabase -Database $db -SessionId $sid `
+    -ConnectionInfo $conn
+```
+
+---
+
+## SQL Generation (CTE-Based)
+
+The `New-CTETraversalQuery` function in `QueryBuilders.ps1` generates the SQL that drives each traversal step. Understanding this SQL is key to understanding SqlSizer's behavior.
+
+### Actual Generated CTE Structure
+
+For an **outgoing** FK traversal (e.g., Order → Customer via CustomerID):
+
+```sql
+-- Traverse OUTGOING FK: FK_Order_Customer
+DECLARE @InsertedRows TABLE (Depth INT);
+
+WITH SourceRecords AS (
+    -- Get rows being processed in this iteration
+    SELECT Key0, Depth, Fk
+    FROM SqlSizer_abc123.Sales_Order src
+    WHERE src.Iteration IN (
+        SELECT FoundIteration
+        FROM SqlSizer.Operations
+        WHERE Status = 0 AND SessionId = 'abc123'
+    )
+),
+NewRecords AS (
+    -- Find referenced Customer records not yet discovered
+    SELECT DISTINCT
+        CAST(tgt.CustomerID AS INT) AS Key0,
+        src.Depth + 1 AS Depth
+    FROM Sales.Customer tgt
+        INNER JOIN Sales.[Order] srcTable ON srcTable.CustomerID = tgt.CustomerID
+        INNER JOIN SourceRecords src ON src.Key0 = srcTable.OrderID
+    WHERE tgt.CustomerID IS NOT NULL
+        AND ((src.Fk <> 42) OR (src.Fk IS NULL))   -- cycle prevention
+        AND NOT EXISTS (
+            SELECT 1
+            FROM SqlSizer_abc123.Sales_Customer existing
+            WHERE existing.Key0 = CAST(tgt.CustomerID AS INT)
+        )
+)
+-- Insert newly found records
+INSERT INTO SqlSizer_abc123.Sales_Customer (Key0, [State], Source, Depth, Fk, Iteration)
+OUTPUT inserted.Depth INTO @InsertedRows
+SELECT Key0, 1, 7, Depth, 42, 5   -- State=Include, Source=TableId, FkId, Iteration
+FROM NewRecords;
+
+-- Promote existing Pending records to Include (if this is an Include traversal)
+UPDATE existing
+SET [State] = 1
+FROM SqlSizer_abc123.Sales_Customer existing
+WHERE existing.[State] = 3   -- Pending
+    AND EXISTS (
+        SELECT 1 FROM (
+            SELECT DISTINCT CAST(tgt.CustomerID AS INT) AS Key0
+            FROM Sales.Customer tgt
+                INNER JOIN Sales.[Order] srcTable ON srcTable.CustomerID = tgt.CustomerID
+                INNER JOIN SqlSizer_abc123.Sales_Order src ON src.Key0 = srcTable.OrderID
+            WHERE src.Iteration IN (
+                SELECT FoundIteration FROM SqlSizer.Operations
+                WHERE Status = 0 AND SessionId = 'abc123'
+            )
+                AND tgt.CustomerID IS NOT NULL
+                AND ((src.Fk <> 42) OR (src.Fk IS NULL))
+        ) nr
+        WHERE existing.Key0 = nr.Key0
+    );
+
+-- Record new operations for the discovered rows
+INSERT INTO SqlSizer.Operations (
+    [Table], [State], ToProcess, Processed, Status, Source, Fk, Depth,
+    Created, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
+)
+SELECT
+    12,         -- Target table ID (Customer)
+    1,          -- Include state
+    COUNT(*),
+    0,
+    NULL,       -- Pending status (ready to process)
+    7,          -- Source table ID (Order)
+    42,         -- FK ID
+    Depth,
+    GETDATE(),
+    NULL,
+    'abc123',
+    5,          -- Current iteration
+    NULL
+FROM @InsertedRows
+GROUP BY Depth;
+```
+
+### Key SQL Patterns
+
+**`@InsertedRows` table variable**: Captures the Depth of each inserted row via OUTPUT clause. This is used to create granular Operations entries grouped by depth.
+
+**Pending→Include promotion**: The UPDATE query runs after every INSERT when `NewState = Include`. It finds existing Pending records that match the same join conditions and promotes them. This handles the case where a record was first discovered as Pending (via incoming FK) and later rediscovered via an Include path.
+
+**Cycle detection**: The `((src.Fk <> $FkId) OR (src.Fk IS NULL))` WHERE clause prevents re-traversing the same FK that originally discovered a row. This is only active in non-FullSearch mode.
+
+**NOT EXISTS deduplication**: Every CTE checks that the target record doesn't already exist in the processing table, ensuring each record is tracked exactly once.
+
+### Incoming vs Outgoing JOIN Differences
+
+**Outgoing FK** (Order → Customer via Order.CustomerID):
+```sql
+FROM Sales.Customer tgt                              -- target table (referenced)
+    INNER JOIN Sales.[Order] srcTable                -- source table (has FK)
+        ON srcTable.CustomerID = tgt.CustomerID      -- FK columns → PK columns
+    INNER JOIN SourceRecords src                      -- processing table rows
+        ON src.Key0 = srcTable.OrderID               -- PK match
+```
+
+**Incoming FK** (Customer ← Order via Order.CustomerID):
+```sql
+FROM Sales.[Order] tgt                               -- target table (FK source)
+    INNER JOIN SourceRecords src                      -- processing table rows
+        ON src.Key0 = tgt.CustomerID                 -- FK columns direct match
+```
 
 ---
 
@@ -560,11 +1010,17 @@ class TableInfo {
     [string]$SchemaName              # e.g., "Sales"
     [string]$TableName               # e.g., "Customer"
     [bool]$IsIdentity                # Has IDENTITY column
+    [bool]$IsHistoric                # Is a system-versioned temporal table
+    [bool]$HasHistory                # Has an associated history table
+    [string]$HistoryOwner            # Name of the history table
+    [string]$HistoryOwnerSchema      # Schema of the history table
     [List[ColumnInfo]]$PrimaryKey    # Primary key columns
     [List[ColumnInfo]]$Columns       # All columns
     [List[TableFk]]$ForeignKeys      # Outgoing FKs (this table → other tables)
     [List[TableInfo]]$IsReferencedBy # Other tables that reference this table
+    [List[ViewInfo]]$Views           # Views depending on this table
     [List[string]]$Triggers          # Trigger names
+    [List[TableIndex]]$Indexes       # Index definitions
     [TableStatistics]$Statistics     # Row count, size info
 }
 ```
@@ -578,7 +1034,7 @@ class TableFk {
     [string]$FkTable           # Source table name
     [string]$Schema            # Referenced/target table schema
     [string]$Table             # Referenced/target table name
-    [ForeignKeyRule]$DeleteRule  # CASCADE, SET NULL, etc.
+    [ForeignKeyRule]$DeleteRule  # NoAction, Cascade, SetNull, SetDefault
     [ForeignKeyRule]$UpdateRule
     [List[ColumnInfo]]$FkColumns   # Source columns (e.g., CustomerID in Order)
     [List[ColumnInfo]]$Columns     # Referenced columns (e.g., CustomerID in Customer)
@@ -596,6 +1052,66 @@ class SqlSizerQuery {
     [string]$Where             # Filter clause (use $table as table alias)
     [int]$Top                  # Limit number of records (-1 = no limit)
     [string]$OrderBy           # Optional ordering
+}
+```
+
+### SqlConnectionInfo
+
+```powershell
+class SqlConnectionInfo {
+    [string]$Server                              # Server instance name
+    [PSCredential]$Credential                    # Username/password authentication
+    [string]$AccessToken                         # Azure AD / token-based auth
+    [bool]$EncryptConnection                     # Enable connection encryption
+    [SqlConnectionStatistics]$Statistics         # Tracks logical reads
+}
+```
+
+### TraversalConfiguration
+
+```powershell
+class TraversalConfiguration {
+    [TraversalRule[]]$Rules          # Per-table behavior overrides
+    [TableInfo2[]]$IgnoredTables     # Tables to skip entirely
+
+    # Methods:
+    # GetItemForTable($schema, $table) → TraversalRule  (O(1) cached lookup)
+    # AddIgnoredTable($schema, $table) → self
+    # AddRule($rule) → self
+}
+```
+
+### TraversalRule
+
+```powershell
+class TraversalRule {
+    [string]$SchemaName
+    [string]$TableName
+    [StateOverride]$StateOverride      # Force a specific TraversalState
+    [TraversalConstraints]$Constraints  # MaxDepth, Top, filters
+
+    # Fluent methods:
+    # SetStateOverride($state) → self
+    # SetMaxDepth($value) → self
+    # SetTop($value) → self
+    # SetSourceFilter($schema, $table) → self
+    # SetForeignKeyFilter($fkName) → self
+}
+```
+
+### TraversalStatistics
+
+```powershell
+class TraversalStatistics {
+    [long]$TotalOperations
+    [long]$CompletedOperations
+    [long]$TotalRecordsProcessed
+    [long]$TotalRecordsRemaining
+    [int]$CurrentIteration
+    [int]$MaxDepthReached
+    [TimeSpan]$ElapsedTime
+
+    [double] PercentComplete()   # 100 * Processed / (Processed + Remaining)
 }
 ```
 
@@ -674,6 +1190,199 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $conn
 
 ---
 
+## Checkpoint & Resume
+
+For long-running traversals, SqlSizer can save progress to a JSON file and resume after crashes or interruptions.
+
+### Enabling Checkpoints
+
+```powershell
+# Save progress every 5 iterations (default)
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -CheckpointPath "C:\temp\subset_checkpoint.json"
+
+# Save more frequently for critical operations
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -CheckpointPath "C:\temp\subset_checkpoint.json" -CheckpointInterval 2
+```
+
+### Checkpoint JSON Structure
+
+```json
+{
+    "Type": "Subset",
+    "SessionId": "abc123def456",
+    "Database": "MyDatabase",
+    "LastCompletedIteration": 15,
+    "FullSearch": false,
+    "UseDfs": false,
+    "MaxBatchSize": -1,
+    "Status": "InProgress",
+    "CreatedAt": "2026-03-17T10:30:00.0000000+01:00",
+    "UpdatedAt": "2026-03-17T10:35:42.0000000+01:00"
+}
+```
+
+For removal subsets, `Type` is `"RemovalSubset"` and the `FullSearch`/`UseDfs` fields are omitted.
+
+### Resuming After a Crash
+
+```powershell
+# Option 1: Direct resume with Find-Subset -Resume
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -CheckpointPath "C:\temp\subset_checkpoint.json" -Resume
+
+# Option 2: Inspect checkpoint first
+$checkpoint = Get-SubsetCheckpoint -Path "C:\temp\subset_checkpoint.json"
+Write-Host "Last completed iteration: $($checkpoint.LastCompletedIteration)"
+Write-Host "Status: $($checkpoint.Status)"
+
+# Option 3: Use convenience wrapper
+Resume-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -CheckpointPath "C:\temp\subset_checkpoint.json"
+```
+
+### How Resume Works Internally
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CHECKPOINT/RESUME FLOW                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Normal Start                        Resume                            │
+│  ────────────                        ──────                            │
+│  Initialize-OperationsTable          Read checkpoint JSON              │
+│  Write initial checkpoint            Validate Type + SessionId         │
+│  StartIteration = 0                  StartIteration = LastCompleted    │
+│       │                                    │                           │
+│       │                              Reset abandoned operations:       │
+│       │                              UPDATE Status=NULL, Processed=0   │
+│       │                              WHERE Status=0 (in-progress)      │
+│       │                                    │                           │
+│       └──────────────┬─────────────────────┘                           │
+│                      │                                                  │
+│                      ▼                                                  │
+│              Main traversal loop                                        │
+│              (continues from StartIteration + 1)                       │
+│                      │                                                  │
+│                      │ Every CheckpointInterval iterations:            │
+│                      │ → Write progress to JSON file                   │
+│                      │                                                  │
+│                      ▼                                                  │
+│              Traversal complete                                         │
+│              → Write final checkpoint (Status = "Completed")           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+The critical recovery step is resetting abandoned in-progress operations: if the process crashed mid-iteration, some Operations rows may have `Status = 0` (in-progress) but weren't actually completed. These are reset to `NULL` (pending) so they'll be re-processed.
+
+---
+
+## Advanced Features
+
+### Interactive Mode
+
+Run traversal one iteration at a time for debugging or inspection:
+
+```powershell
+# Initialize (Iteration = 0)
+$result = Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -Interactive $true -Iteration 0
+
+# Step through iterations
+$iteration = 1
+while (-not $result.Finished) {
+    # Inspect state between iterations
+    Get-SubsetTables -Database $db -SessionId $sid `
+        -DatabaseInfo $info -ConnectionInfo $conn | Format-Table
+
+    # Run next iteration
+    $result = Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+        -ConnectionInfo $conn -Interactive $true -Iteration $iteration
+    $iteration++
+}
+```
+
+### Batch Processing (MaxBatchSize)
+
+Controls how many rows are processed per operation:
+
+```powershell
+# Process at most 10,000 rows per operation
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -MaxBatchSize 10000
+```
+
+**How it works:**
+- Default is `-1` (unlimited) - process all rows in one operation
+- When set, each CTE query includes `TOP ($MaxBatchSize)`
+- If an operation has more rows than the batch size, `Set-OperationInProgress` only advances `Processed` by the batch amount
+- After execution, `Complete-Operations` resets partially-complete operations to `Status = NULL` for re-queuing
+- This bounds memory usage and prevents any single SQL statement from running too long
+
+### Query Caching
+
+Generated SQL is cached to avoid re-generating complex CTE queries:
+
+```
+Cache Key Format: "{SchemaName}_{TableName}_{StateInt}_{OUT|IN}"
+
+Example: "Sales_Customer_1_OUT" → cached CTE for Customer outgoing FKs with Include state
+```
+
+The cache is keyed by table + state + direction because the generated SQL is identical across iterations—only the `Iteration` column in `SourceRecords` CTE changes, and that's handled by the `WHERE src.Iteration IN (...)` clause.
+
+For `Find-RemovalSubset`, the cache uses `##DEPTH##` and `##ITERATION##` placeholders that are string-replaced at execution time.
+
+### Cycle Detection
+
+Self-referential tables and circular FK chains are handled by this WHERE clause in non-FullSearch mode:
+
+```sql
+AND ((src.Fk <> 42) OR (src.Fk IS NULL))
+```
+
+This means: "don't re-traverse the same FK that originally discovered this row." Without this, a self-referential table like `Employee.ManagerID → Employee.EmployeeID` would cause infinite loops.
+
+In FullSearch mode (`$true`), this guard is disabled—the `NOT EXISTS` deduplication is sufficient because every record is only inserted once.
+
+### Composite Key Support
+
+SqlSizer handles tables with multi-column primary keys transparently. A table with a 3-column composite PK gets `Key0`, `Key1`, `Key2` columns in its processing table:
+
+```sql
+-- For table with PK (OrderID, ProductID, LineNumber)
+CREATE TABLE SqlSizer_abc123.Sales_OrderDetail (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Key0 INT NOT NULL,          -- OrderID
+    Key1 INT NOT NULL,          -- ProductID
+    Key2 SMALLINT NOT NULL,     -- LineNumber
+    [State] TINYINT NOT NULL,
+    [Source] SMALLINT NULL,
+    [Depth] SMALLINT NOT NULL,
+    [Fk] SMALLINT,
+    [Iteration] INT NOT NULL
+);
+```
+
+The CTE queries automatically generate the correct number of join conditions and column mappings for any PK size.
+
+### Temporal Tables
+
+SqlSizer recognizes SQL Server's system-versioned temporal tables via `TableInfo` flags:
+
+| Flag | Meaning |
+|------|---------|
+| `IsHistoric` | This table IS a history table (the "shadow" table) |
+| `HasHistory` | This table HAS a history table (it's system-versioned) |
+| `HistoryOwner` | Name of the main table (set on history tables) |
+| `HistoryOwnerSchema` | Schema of the main table |
+
+When processing temporal tables, SqlSizer includes the main table in the subset. History tables are tracked via the `IsHistoric` flag for appropriate handling during copy operations.
+
+---
+
 ## Common Scenarios
 
 ### Scenario 1: Create Development Database from Production
@@ -749,12 +1458,65 @@ foreach ($table in $tables) {
     $json = Get-SubsetTableJson -Database $db -SessionId $sessionId `
         -Schema $table.SchemaName -Table $table.TableName `
         -ConnectionInfo $connection
-    
+
     $json | Out-File "export\$($table.SchemaName)_$($table.TableName).json"
 }
 ```
 
-### Scenario 4: Compare Two Subsets
+### Scenario 4: Long-Running Subset with Checkpointing
+
+**Goal**: Extract a large subset that may take hours, with crash recovery.
+
+```powershell
+$sessionId = Start-SqlSizerSession -Database $db -ConnectionInfo $conn -DatabaseInfo $info
+
+# Define seed records
+$query = New-Object -TypeName SqlSizerQuery
+$query.State = [TraversalState]::Include
+$query.Schema = "Sales"
+$query.Table = "Region"
+$query.KeyColumns = @('RegionID')
+$query.Where = "[`$table].RegionName = 'North America'"
+
+Initialize-StartSet -Database $db -Queries @($query) -SessionId $sessionId `
+    -DatabaseInfo $info -ConnectionInfo $conn
+
+# Run with checkpointing (saves every 3 iterations) and batch limiting
+Find-Subset -Database $db -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $conn `
+    -CheckpointPath "C:\temp\na_subset.json" -CheckpointInterval 3 `
+    -MaxBatchSize 50000
+
+# If it crashes, resume:
+# Find-Subset -Database $db -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $conn `
+#     -CheckpointPath "C:\temp\na_subset.json" -Resume
+```
+
+### Scenario 5: Subset with Configuration
+
+**Goal**: Extract data but exclude audit tables and limit depth on history tables.
+
+```powershell
+$config = New-Object TraversalConfiguration
+
+# Ignore audit tables entirely
+$config.AddIgnoredTable("dbo", "AuditLog")
+$config.AddIgnoredTable("dbo", "ChangeHistory")
+
+# Limit traversal depth on large history tables
+$historyRule = [TraversalRule]::new("Sales", "OrderStatusHistory")
+$historyRule.SetMaxDepth(1)
+$config.AddRule($historyRule)
+
+# Force-exclude lookup tables (they'll be populated separately)
+$lookupRule = [TraversalRule]::new("dbo", "CountryCode")
+$lookupRule.SetStateOverride([TraversalState]::Exclude)
+$config.AddRule($lookupRule)
+
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -TraversalConfiguration $config
+```
+
+### Scenario 6: Compare Two Subsets
 
 **Goal**: Verify consistency between two subset operations.
 
@@ -865,6 +1627,81 @@ finally {
 
 ---
 
+## Copy-Database
+
+`Copy-Database` creates a full clone of a database using SQL Server's backup/restore mechanism.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    COPY-DATABASE PROCESS                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. Backup source database                                             │
+│     → Queries SQL Server for default backup path                       │
+│     → BACKUP DATABASE [Source] TO DISK = '{path}\Source.bak'           │
+│                                                                         │
+│  2. Read backup metadata                                               │
+│     → RESTORE FILELISTONLY FROM DISK = '{path}\Source.bak'             │
+│     → Gets logical file names (data file, log file)                    │
+│                                                                         │
+│  3. Get default data/log paths                                         │
+│     → Queries SQL Server for default data directory                    │
+│     → Queries SQL Server for default log directory                     │
+│                                                                         │
+│  4. Restore as new database                                            │
+│     → RESTORE DATABASE [NewDB] FROM DISK = '{path}\Source.bak'        │
+│       WITH MOVE 'DataFile' TO '{data_path}\NewDB.mdf',                │
+│            MOVE 'LogFile'  TO '{log_path}\NewDB_log.ldf',             │
+│            REPLACE, RECOVERY                                           │
+│     → Reports progress at 25%, 50%, 90%, 100%                         │
+│                                                                         │
+│  5. Cleanup                                                            │
+│     → Deletes backup file                                              │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Usage
+
+```powershell
+Copy-Database -Database "Production" -NewDatabase "Production_Subset" `
+    -ConnectionInfo $connection
+```
+
+This is typically used before `Copy-DataFromSubset` to create a target database with the same schema, then clear it and populate with only the subset data.
+
+---
+
+## Azure SQL Support
+
+SqlSizer supports Azure SQL Database with token-based authentication and Azure-specific operations.
+
+### Connection with Access Token
+
+```powershell
+$connection = New-SqlConnectionInfo -Server "myserver.database.windows.net"
+$connection.AccessToken = $azureToken
+$connection.EncryptConnection = $true
+```
+
+### Azure-Specific Cmdlets
+
+| Cmdlet | Purpose |
+|--------|---------|
+| `Copy-AzDatabase` | Copy Azure SQL database within Azure |
+| `Import-SubsetFromAzStorageContainer` | Import subset data from Azure Blob Storage |
+
+### Invoke-SqlcmdEx Azure Support
+
+The internal `Invoke-SqlcmdEx` function handles Azure transparently:
+- Passes `-AccessToken` to `Invoke-Sqlcmd` when set
+- Configures `-Encrypt` and `-TrustServerCertificate` based on `EncryptConnection`
+- Compatible with both `SqlServer` module (v22+) and legacy `SQLPS`
+
+---
+
 ## Performance Considerations
 
 ### Memory Efficiency
@@ -874,16 +1711,18 @@ finally {
 | **Server-side processing** | All heavy lifting done in SQL Server, not PowerShell |
 | **Streaming results** | Results paged, not loaded entirely into memory |
 | **No record duplication** | Each record tracked once regardless of discovery paths |
-| **O(1) lookups** | Hashtable-based table lookups instead of linear search |
+| **O(1) lookups** | Hashtable-based table/FK lookups instead of linear search |
 
 ### Query Optimization
 
 | Optimization | Description |
 |--------------|-------------|
 | **CTE-based queries** | Better query plan optimization by SQL Server |
-| **Query caching** | Same table/state combinations reuse generated SQL |
+| **Query caching** | Same table/state/direction combinations reuse generated SQL |
 | **Batch processing** | Configurable `MaxBatchSize` for controlled resource usage |
-| **Parallel FK queries** | Multiple FK relationships processed in single SQL batch |
+| **Batched FK queries** | Multiple FK relationships processed in single SQL execution |
+| **Indexed processing tables** | Key columns + State (or Depth) indexed for fast lookups |
+| **Iteration-based filtering** | SourceRecords CTE only reads current iteration's rows |
 
 ### Best Practices
 
@@ -894,6 +1733,8 @@ finally {
 | Slow performance | Check for missing indexes on FK columns |
 | Azure SQL | Connection already optimized for cloud |
 | Memory pressure | Use DFS (`UseDfs = $true`) for lower memory footprint |
+| Long-running traversals | Enable checkpointing with `-CheckpointPath` |
+| High-fanout tables | Use `TraversalConfiguration` with `MaxDepth` or `Top` limits |
 
 ### Index Recommendations
 
@@ -906,9 +1747,9 @@ Install-ForeignKeyIndexes -Database $db -ConnectionInfo $connection -DatabaseInf
 ```
 
 **Critical indexes to verify:**
-- ✅ All primary key columns (usually automatic)
-- ⚠️ All foreign key columns (often missing!)
-- ⚠️ Columns in WHERE clauses of your seed queries
+- All primary key columns (usually automatic)
+- All foreign key columns (often missing!)
+- Columns in WHERE clauses of your seed queries
 
 ---
 
@@ -924,6 +1765,8 @@ Install-ForeignKeyIndexes -Database $db -ConnectionInfo $connection -DatabaseInf
 | **FK constraint errors on copy** | Wrong deletion/insertion order | Use provided cmdlets - they handle ordering |
 | **Missing tables in subset** | No FK path to table | Add explicit seed query for orphan tables |
 | **Circular reference warning** | Self-referential or cyclic FKs | Normal - algorithm handles cycles correctly |
+| **Checkpoint resume fails** | SessionId mismatch | Ensure same SessionId as original run |
+| **Traversal seems stuck** | High-fanout table exploding | Add `TraversalConfiguration` with `Top` or `MaxDepth` limits |
 
 ### Debugging Tips
 
@@ -938,7 +1781,7 @@ Find-Subset -Database $db -SessionId $sessionId `
 ```powershell
 # Connect directly to check what's been discovered
 $sql = @"
-SELECT 
+SELECT
     OBJECT_SCHEMA_NAME(object_id) AS [Schema],
     OBJECT_NAME(object_id) AS [Table],
     SUM(row_count) AS [RowCount]
@@ -946,6 +1789,22 @@ FROM sys.dm_db_partition_stats
 WHERE OBJECT_SCHEMA_NAME(object_id) LIKE 'SqlSizer_%'
 GROUP BY object_id
 ORDER BY [RowCount] DESC
+"@
+
+Invoke-Sqlcmd -Query $sql -Database $db -ServerInstance "localhost"
+```
+
+**Check Operations Status:**
+```powershell
+$sql = @"
+SELECT
+    t.[Schema] + '.' + t.TableName AS [Table],
+    o.[State], o.Depth, o.ToProcess, o.Processed,
+    CASE o.Status WHEN 0 THEN 'In Progress' WHEN 1 THEN 'Complete' ELSE 'Pending' END AS Status
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.SessionId = '$sessionId'
+ORDER BY o.Depth, t.[Schema], t.TableName
 "@
 
 Invoke-Sqlcmd -Query $sql -Database $db -ServerInstance "localhost"
@@ -979,20 +1838,26 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 
 | Term | Definition |
 |------|------------|
-| **Seed Record** | Starting point for traversal - records you explicitly specify |
-| **Processing Table** | Temporary table tracking discovered records per source table |
+| **Seed Record** | Starting point for traversal - records you explicitly specify via `SqlSizerQuery` |
+| **Processing Table** | Session-specific table tracking discovered records per source table |
 | **Session** | Isolated workspace with its own schema and processing tables |
-| **SessionId** | Unique identifier for a session (e.g., "abc123") |
-| **Traversal State** | Classification of a record (Include, Exclude, Pending, InboundOnly) |
+| **SessionId** | Unique identifier for a session (GUID with hyphens removed) |
+| **Traversal State** | Classification of a record: Include, Exclude, Pending, InboundOnly, IncludeFull |
 | **Outgoing FK** | Following FK from child table to parent (dependency direction) |
 | **Incoming FK** | Following FK from parent to child (dependent direction) |
 | **FullSearch** | Mode that follows both outgoing and incoming FKs |
 | **Depth** | Number of hops from seed records |
 | **Iteration** | Processing cycle number when record was discovered |
+| **Operation** | A unit of work in `SqlSizer.Operations`: process N rows from one table/state/depth |
 | **BFS** | Breadth-First Search - processes all records at same depth before going deeper |
 | **DFS** | Depth-First Search - follows one path fully before exploring alternatives |
 | **CTE** | Common Table Expression - SQL feature for readable subqueries |
-| **Color** | Internal name for TraversalState (legacy terminology) |
+| **TraversalConfiguration** | Object for customizing per-table traversal behavior (rules, constraints, ignores) |
+| **StateOverride** | Forces a specific TraversalState for a table, bypassing normal transition logic |
+| **TraversalConstraints** | Limits on traversal depth or row count for a specific table |
+| **Checkpoint** | JSON file recording traversal progress for crash recovery |
+| **Structure** | Internal class mapping tables to their processing table names via signatures |
+| **Signature** | A table's `SchemaName_TableName` string, used to name its processing table |
 
 ---
 
@@ -1024,10 +1889,18 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 
 | Cmdlet | Purpose |
 |--------|---------|
-| `Copy-Database` | Clone database structure |
+| `Copy-Database` | Clone database via backup/restore |
 | `Clear-Database` | Delete all data from tables |
 | `Remove-FoundSubsetFromDatabase` | Delete subset records in FK order |
 | `Import-SubsetFromFileSet` | Import from file-based export |
+
+### Checkpoint & Resume
+
+| Cmdlet | Purpose |
+|--------|---------|
+| `Get-SubsetCheckpoint` | Inspect a checkpoint file |
+| `Resume-Subset` | Resume a Find-Subset from checkpoint |
+| `Resume-RemovalSubset` | Resume a Find-RemovalSubset from checkpoint |
 
 ### Maintenance
 
@@ -1035,11 +1908,20 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 |--------|---------|
 | `Clear-SqlSizerSession` | Remove single session |
 | `Clear-SqlSizerSessions` | Remove ALL sessions |
-| `Get-SqlSizerInfo` | List active sessions |
+| `Get-SqlSizerInfo` | List active sessions and metadata |
 | `Disable-ForeignKeys` | Temporarily disable FK constraints |
 | `Enable-ForeignKeys` | Re-enable FK constraints |
 | `Test-ForeignKeys` | Validate FK integrity |
 | `Install-ForeignKeyIndexes` | Create missing FK indexes |
+| `Test-DatabaseOnline` | Check database availability |
+| `Test-Queries` | Validate seed queries before execution |
+
+### Azure Operations
+
+| Cmdlet | Purpose |
+|--------|---------|
+| `Copy-AzDatabase` | Copy Azure SQL database |
+| `Import-SubsetFromAzStorageContainer` | Import from Azure Blob Storage |
 
 ---
 
@@ -1048,12 +1930,17 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 **In This Repository:**
 - [Examples/AdventureWorks2019/Subset/](../Examples/AdventureWorks2019/Subset/) - Working subset examples
 - [Examples/AdventureWorks2019/Removal/](../Examples/AdventureWorks2019/Removal/) - Data removal examples
+- [Examples/Azure/AzureSQL/](../Examples/Azure/AzureSQL/) - Azure SQL examples
 - [README.md](../README.md) - Quick start and feature overview
+- [CHANGELOG.md](../CHANGELOG.md) - Version history and migration guides
 
 **Example Scripts:**
-- [00-Simple-Find-Subset-Example.ps1](../Examples/AdventureWorks2019/Subset/00-Simple-Find-Subset-Example.ps1) - Basic usage
-- [01-Basic-Data-Removal.ps1](../Examples/AdventureWorks2019/Removal/01-Basic-Data-Removal.ps1) - Safe deletion
+- [00-Simple-Find-Subset-Example.ps1](../Examples/AdventureWorks2019/Subset/00-Simple-Find-Subset-Example.ps1) - Basic subset usage
+- [02-Create-New-Database-With-Subset.ps1](../Examples/AdventureWorks2019/Subset/02-Create-New-Database-With-Subset.ps1) - Full database creation workflow
+- [05-Interactive-Subset-Search.ps1](../Examples/AdventureWorks2019/Subset/05-Interactive-Subset-Search.ps1) - Interactive mode example
+- [09-Two-Phase-Search-Strategy.ps1](../Examples/AdventureWorks2019/Subset/09-Two-Phase-Search-Strategy.ps1) - Advanced multi-phase approach
+- [01-Basic-Data-Removal.ps1](../Examples/AdventureWorks2019/Removal/01-Basic-Data-Removal.ps1) - Safe deletion workflow
 
 ---
 
-*Last updated: February 2026 | SqlSizer-MSSQL v2.0.1*
+*Last updated: March 2026 | SqlSizer-MSSQL v2.0.2*
