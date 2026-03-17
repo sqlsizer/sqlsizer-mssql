@@ -7,9 +7,6 @@ function Get-DatabaseInfo
         [Parameter(Mandatory = $false)]
         [bool]$MeasureSize,
 
-        [Parameter(Mandatory = $false)]
-        [DatabaseStructureInfo]$AdditonalStructureInfo,
-
         [Parameter(Mandatory = $true)]
         [SqlConnectionInfo]$ConnectionInfo
     )
