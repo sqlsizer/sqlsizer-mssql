@@ -96,13 +96,10 @@ function Find-Subset
         [switch]$Resume
     )
 
-    # Query caches - keyed by "schema_table_state_direction"
-    $queryCache = New-Object "System.Collections.Generic.Dictionary[[string], [string]]"
-    
     # O(1) table lookup hashtable - built at initialization
-    $script:tablesByFullName = @{}
+    $tablesByFullName = @{}
     foreach ($t in $DatabaseInfo.Tables) {
-        $script:tablesByFullName["$($t.SchemaName), $($t.TableName)"] = $t
+        $tablesByFullName["$($t.SchemaName), $($t.TableName)"] = $t
     }
     
     #region Helper Functions
@@ -127,8 +124,8 @@ function Find-Subset
 
         # Use List<string> instead of += for efficient string building
         $queryList = [System.Collections.Generic.List[string]]::new()
-        $tableId = $script:tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
-        $processing = $script:structure.GetProcessingName($script:structure.Tables[$Table], $SessionId)
+        $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
+        $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
 
         $relationships = if ($Direction -eq [TraversalDirection]::Outgoing) {
             $Table.ForeignKeys
@@ -172,17 +169,17 @@ function Find-Subset
                 $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
 
                 # O(1) lookup using hashtable instead of Where-Object
-                $targetTableInfo = $script:tablesByFullName["$targetSchema, $targetTable"]
+                $targetTableInfo = $tablesByFullName["$targetSchema, $targetTable"]
                 
                 if ($null -eq $targetTableInfo -or $targetTableInfo.PrimaryKey.Count -eq 0)
                 {
                     continue
                 }
 
-                $targetTableId = $script:tablesGroupedByName["$targetSchema, $targetTable"].Id
-                $targetSignature = $script:structure.Tables[$targetTableInfo]
-                $targetProcessing = $script:structure.GetProcessingName($targetSignature, $SessionId)
-                $fkId = $script:fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
+                $targetTableId = $tablesGroupedByName["$targetSchema, $targetTable"].Id
+                $targetSignature = $structure.Tables[$targetTableInfo]
+                $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
+                $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
 
                 # Build CTE-based query using shared function
                 $query = New-CTETraversalQuery `
@@ -225,7 +222,7 @@ function Find-Subset
         )
 
         # O(1) lookup using hashtable instead of Where-Object
-        $table = $script:tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
+        $table = $tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
 
         Write-Progress -Activity "Finding subset $SessionId" `
                        -CurrentOperation "$($table.SchemaName).$($table.TableName) - State: $($Operation.State)" `
@@ -241,23 +238,12 @@ function Find-Subset
         # Build outgoing traversal query
         if ($traverseOutgoing)
         {
-            $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_OUT"
-            
-            if ($queryCache.ContainsKey($cacheKey))
-            {
-                $query = $queryCache[$cacheKey]
-            }
-            else
-            {
-                $query = New-TraversalQuery `
-                    -Table $table `
-                    -State $Operation.State `
-                    -Direction ([TraversalDirection]::Outgoing) `
-                    -TraversalConfiguration $TraversalConfiguration `
-                    -Iteration $Iteration
-                
-                $queryCache[$cacheKey] = $query
-            }
+            $query = New-TraversalQuery `
+                -Table $table `
+                -State $Operation.State `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -TraversalConfiguration $TraversalConfiguration `
+                -Iteration $Iteration
 
             if ($query -ne "")
             {
@@ -268,23 +254,12 @@ function Find-Subset
         # Build incoming traversal query
         if ($traverseIncoming)
         {
-            $cacheKey = "$($table.SchemaName)_$($table.TableName)_$([int]$Operation.State)_IN"
-            
-            if ($queryCache.ContainsKey($cacheKey))
-            {
-                $query = $queryCache[$cacheKey]
-            }
-            else
-            {
-                $query = New-TraversalQuery `
-                    -Table $table `
-                    -State $Operation.State `
-                    -Direction ([TraversalDirection]::Incoming) `
-                    -TraversalConfiguration $TraversalConfiguration `
-                    -Iteration $Iteration
-                
-                $queryCache[$cacheKey] = $query
-            }
+            $query = New-TraversalQuery `
+                -Table $table `
+                -State $Operation.State `
+                -Direction ([TraversalDirection]::Incoming) `
+                -TraversalConfiguration $TraversalConfiguration `
+                -Iteration $Iteration
 
             if ($query -ne "")
             {
@@ -331,8 +306,8 @@ function Find-Subset
         # Mark ALL remaining Pending as Exclude (those not promoted to Include during traversal)
         foreach ($table in $tables)
         {
-            $signature = $script:structure.Tables[$table]
-            $processing = $script:structure.GetProcessingName($signature, $SessionId)
+            $signature = $structure.Tables[$table]
+            $processing = $structure.GetProcessingName($signature, $SessionId)
             $pendingState = [int][TraversalState]::Pending
             $excludeState = [int][TraversalState]::Exclude
 
@@ -601,12 +576,6 @@ WHERE SessionId = '$SessionId'
         # Complete operations
         Complete-Operations -Iteration $Iteration
 
-        # Resolve any Pending states created in this iteration
-        if ($operation.State -eq [TraversalState]::Include -and -not $FullSearch)
-        {
-            Resolve-PendingStates -Iteration $Iteration
-        }
-
         return $true
     }
 
@@ -615,10 +584,10 @@ WHERE SessionId = '$SessionId'
     #region Main Execution
 
     # Initialize metadata
-    $script:structure = [Structure]::new($DatabaseInfo)
+    $structure = [Structure]::new($DatabaseInfo)
     $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
-    $script:tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
-    $script:fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
+    $tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
+    $fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
 
     if ($Interactive -eq $false)
     {
@@ -696,7 +665,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
         $startTime = Get-Date
         $iteration = $StartIteration + 1
-        $script:percentComplete = 0
+        $percentComplete = 0
 
         do
         {
@@ -706,7 +675,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             if (($iteration % $CheckpointInterval) -eq 0)
             {
                 $stats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
-                $script:percentComplete = $stats.PercentComplete()
+                $percentComplete = $stats.PercentComplete()
                 Write-Verbose $stats.ToString()
 
                 if ($CheckpointPath)
@@ -730,6 +699,12 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             $iteration++
         }
         while ($hasMoreWork)
+
+        # Resolve all remaining Pending states after traversal completes
+        if (-not $FullSearch)
+        {
+            Resolve-PendingStates -Iteration $iteration
+        }
 
         # Write final checkpoint
         if ($CheckpointPath)
@@ -779,8 +754,14 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         else
         {
             $startTime = Get-Date
-            $script:percentComplete = 0
+            $percentComplete = 0
             $hasMoreWork = Invoke-SearchIteration -Iteration $Iteration
+
+            # Resolve Pending states when traversal is complete
+            if (-not $hasMoreWork -and -not $FullSearch)
+            {
+                Resolve-PendingStates -Iteration $Iteration
+            }
 
             return [pscustomobject]@{
                 Finished            = -not $hasMoreWork
