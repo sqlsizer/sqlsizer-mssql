@@ -357,7 +357,6 @@ See [Tests/README.md](Tests/README.md) for details.
 | Guide | Description |
 |-------|-------------|
 | **[How It Works](docs/HOW-IT-WORKS.md)** | Complete technical reference: algorithms, state transitions, CTE generation, database schemas, traversal configuration, checkpoint/resume, advanced features, troubleshooting |
-| **[Changelog](CHANGELOG.md)** | Version history, breaking changes, migration guides |
 
 ---
 
