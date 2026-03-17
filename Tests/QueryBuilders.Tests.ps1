@@ -280,56 +280,65 @@ Describe 'New-ExcludePendingQuery' {
 
 Describe 'New-CTETraversalQuery - Structure Tests' {
     BeforeAll {
+        # Helper to create ColumnInfo objects
+        function New-ColumnInfo([string]$Name, [string]$DataType) {
+            $col = New-Object ColumnInfo
+            $col.Name = $Name
+            $col.DataType = $DataType
+            return $col
+        }
+
+        # Helper to create TableInfo objects
+        function New-MockTableInfo([string]$Schema, [string]$Table, [array]$PkColumns) {
+            $t = New-Object TableInfo
+            $t.SchemaName = $Schema
+            $t.TableName = $Table
+            $t.PrimaryKey = [System.Collections.Generic.List[ColumnInfo]]::new()
+            foreach ($col in $PkColumns) {
+                $t.PrimaryKey.Add($col)
+            }
+            return $t
+        }
+
         # Create minimal mock objects for testing
-        $mockSourceTable = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'Customers'
-            PrimaryKey = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })
+        $mockSourceTable = New-MockTableInfo -Schema 'dbo' -Table 'Customers' -PkColumns @(
+            (New-ColumnInfo 'CustomerID' 'int')
+        )
+
+        $mockTargetTable = New-MockTableInfo -Schema 'dbo' -Table 'Orders' -PkColumns @(
+            (New-ColumnInfo 'OrderID' 'int')
+        )
+
+        # Helper to create TableFk objects
+        function New-MockTableFk([string]$Name, [array]$FkColumns, [array]$Columns) {
+            $fk = New-Object TableFk
+            $fk.Name = $Name
+            $fk.FkColumns = [System.Collections.Generic.List[ColumnInfo]]::new()
+            foreach ($col in $FkColumns) { $fk.FkColumns.Add($col) }
+            $fk.Columns = [System.Collections.Generic.List[ColumnInfo]]::new()
+            foreach ($col in $Columns) { $fk.Columns.Add($col) }
+            return $fk
         }
 
-        $mockTargetTable = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'Orders'
-            PrimaryKey = @([PSCustomObject]@{ Name = 'OrderID'; DataType = 'int' })
-        }
-
-        $mockFk = [PSCustomObject]@{
-            Name      = 'FK_Orders_Customers'
-            FkColumns = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })
-            Columns   = @([PSCustomObject]@{ Name = 'CustomerID'; DataType = 'int' })  # Referenced PK columns
-        }
+        $mockFk = New-MockTableFk -Name 'FK_Orders_Customers' `
+            -FkColumns @((New-ColumnInfo 'CustomerID' 'int')) `
+            -Columns @((New-ColumnInfo 'CustomerID' 'int'))
 
         # Create mock tables with multiple columns for dynamic key testing
-        $mockSourceTableMultiKey = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'CompositeKeyTable'
-            PrimaryKey = @(
-                [PSCustomObject]@{ Name = 'Key1'; DataType = 'int' },
-                [PSCustomObject]@{ Name = 'Key2'; DataType = 'varchar' },
-                [PSCustomObject]@{ Name = 'Key3'; DataType = 'uniqueidentifier' }
-            )
-        }
+        $mockSourceTableMultiKey = New-MockTableInfo -Schema 'dbo' -Table 'CompositeKeyTable' -PkColumns @(
+            (New-ColumnInfo 'Key1' 'int'),
+            (New-ColumnInfo 'Key2' 'varchar'),
+            (New-ColumnInfo 'Key3' 'uniqueidentifier')
+        )
 
-        $mockTargetTableMultiKey = [PSCustomObject]@{
-            SchemaName = 'dbo'
-            TableName  = 'RelatedTable'
-            PrimaryKey = @(
-                [PSCustomObject]@{ Name = 'RelatedKey1'; DataType = 'int' },
-                [PSCustomObject]@{ Name = 'RelatedKey2'; DataType = 'varchar' }
-            )
-        }
+        $mockTargetTableMultiKey = New-MockTableInfo -Schema 'dbo' -Table 'RelatedTable' -PkColumns @(
+            (New-ColumnInfo 'RelatedKey1' 'int'),
+            (New-ColumnInfo 'RelatedKey2' 'varchar')
+        )
 
-        $mockFkMultiColumn = [PSCustomObject]@{
-            Name      = 'FK_Related_Composite'
-            FkColumns = @(
-                [PSCustomObject]@{ Name = 'FkKey1'; DataType = 'int' },
-                [PSCustomObject]@{ Name = 'FkKey2'; DataType = 'varchar' }
-            )
-            Columns   = @(
-                [PSCustomObject]@{ Name = 'Key1'; DataType = 'int' },
-                [PSCustomObject]@{ Name = 'Key2'; DataType = 'varchar' }
-            )  # Referenced PK columns from CompositeKeyTable
-        }
+        $mockFkMultiColumn = New-MockTableFk -Name 'FK_Related_Composite' `
+            -FkColumns @((New-ColumnInfo 'FkKey1' 'int'), (New-ColumnInfo 'FkKey2' 'varchar')) `
+            -Columns @((New-ColumnInfo 'Key1' 'int'), (New-ColumnInfo 'Key2' 'varchar'))
 
         # Mock Get-ColumnValue function
         Mock Get-ColumnValue { return "tgt.$ColumnName" }

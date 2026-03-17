@@ -593,7 +593,6 @@ class TraversalConfiguration
         return $this
     }
 }
-}
 
 
 class TraversalRule
