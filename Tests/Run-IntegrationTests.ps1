@@ -50,6 +50,12 @@ if (-not (Get-Module -Name dbatools)) {
     Import-Module dbatools -ErrorAction SilentlyContinue
 }
 
+# Configure dbatools for local unencrypted connections before Pester starts
+if (Get-Module -Name dbatools) {
+    Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -PassThru | Register-DbatoolsConfig
+    Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -PassThru | Register-DbatoolsConfig
+}
+
 # Import SqlSizer module with Global scope - this loads the types globally
 Write-Host "Loading SqlSizer-MSSQL module..." -ForegroundColor Cyan
 Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Global

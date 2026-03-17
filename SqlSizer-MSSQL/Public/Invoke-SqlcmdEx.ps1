@@ -25,17 +25,26 @@ function Invoke-SqlcmdEx
     {
         Write-Verbose "Invoke SQL [$(Get-Date)] => $($Sql.Substring(0, [Math]::Min(80, $Sql.Length))) ..."
         
-        # Determine encryption setting for SQLServer module v22+
-        $encryptValue = if ($ConnectionInfo.EncryptConnection) { 'Mandatory' } else { 'Optional' }
-        
         $params = @{
             Query             = $Sql
             ServerInstance    = $ConnectionInfo.Server
             Database          = $Database
             QueryTimeout      = 65535
             Verbose           = $true
-            Encrypt           = $encryptValue
-            TrustServerCertificate = (-not $ConnectionInfo.EncryptConnection)
+        }
+
+        # Detect SqlServer module v22+ vs legacy SQLPS module
+        $sqlcmdInfo = Get-Command Invoke-Sqlcmd -ErrorAction SilentlyContinue
+        if ($sqlcmdInfo.Parameters.ContainsKey('Encrypt')) {
+            # SqlServer module v22+: uses -Encrypt (string) and -TrustServerCertificate
+            $params.Encrypt = if ($ConnectionInfo.EncryptConnection) { 'Mandatory' } else { 'Optional' }
+            $params.TrustServerCertificate = (-not $ConnectionInfo.EncryptConnection)
+        }
+        elseif ($sqlcmdInfo.Parameters.ContainsKey('EncryptConnection')) {
+            # Legacy SQLPS module: uses -EncryptConnection (switch)
+            if ($ConnectionInfo.EncryptConnection) {
+                $params.EncryptConnection = $true
+            }
         }
 
         if (($null -ne $ConnectionInfo.AccessToken) -and ($ConnectionInfo.AccessToken -ne ""))

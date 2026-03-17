@@ -159,7 +159,7 @@ Describe 'Basic Incoming FK Traversal' {
     }
     
     Context 'Multi-Hop Incoming FK Chains' {
-        It 'Should traverse Category → SubCategories → Products → ProductVariants' {
+        It 'Should traverse Category -> SubCategories -> Products -> ProductVariants' {
             # Starting from Category, should find all dependents down the chain
             $query = New-RemovalQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
                 -Where "[`$table].ParentCategoryId IS NULL" -Top 1
@@ -177,7 +177,7 @@ Describe 'Basic Incoming FK Traversal' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'ProductVariants' -MinRows 1
         }
         
-        It 'Should traverse Contact → Customer → Orders → OrderDetails' {
+        It 'Should traverse Contact -> Customer -> Orders -> OrderDetails' {
             $query = New-RemovalQuery -Schema 'dbo' -Table 'Contacts' -KeyColumns @('ContactId') -Top 1
             
             $testResult = Invoke-FindRemovalSubsetTest `
@@ -287,8 +287,8 @@ Describe 'Circular References in Removal' {
     }
     
     Context 'Employee-Department Circular Reference' {
-        It 'Should terminate correctly with Employee ↔ Department circular reference' {
-            # Employee → Department (DeptId), Department → Employee (HeadId)
+        It 'Should terminate correctly with Employee-Department bidirectional circular reference' {
+            # Employee -> Department (DeptId), Department -> Employee (HeadId)
             $query = New-RemovalQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') `
                 -Where "[`$table].ManagerId IS NULL" -Top 1
             
@@ -516,7 +516,7 @@ Describe 'Deep FK Chains in Removal' {
     }
     
     Context '8-Level Deep Chain' {
-        It 'Should traverse A → B → C → D → E → F → G → H (all dependents)' {
+        It 'Should traverse A -> B -> C -> D -> E -> F -> G -> H (all dependents)' {
             # Starting from DeepChainA, should find all tables that eventually depend on it
             $query = New-RemovalQuery -Schema 'dbo' -Table 'DeepChainA' -KeyColumns @('Id') -Top 1
             
@@ -751,7 +751,7 @@ Describe 'Diamond Pattern in Removal' {
     
     Context 'Multiple Incoming FKs' {
         It 'Should find Customers with multiple contact FKs when deleting Contact' {
-            # Customers have PrimaryContactId, BillingContactId, ShippingContactId → Contacts
+            # Customers have PrimaryContactId, BillingContactId, ShippingContactId -> Contacts
             $query = New-RemovalQuery -Schema 'dbo' -Table 'Contacts' -KeyColumns @('ContactId') -Top 1
             
             $testResult = Invoke-FindRemovalSubsetTest `

@@ -44,6 +44,12 @@ BeforeAll {
     $script:Connection.Server = $Server
     $script:Connection.EncryptConnection = $false
     $script:Connection.Statistics = New-Object SqlConnectionStatistics
+
+    # Configure dbatools for unencrypted local connections
+    if (Get-Module -Name dbatools -ErrorAction SilentlyContinue) {
+        Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -PassThru | Register-DbatoolsConfig
+        Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -PassThru | Register-DbatoolsConfig
+    }
     
     # Calculate row counts
     $script:RowCounts = Get-ScaledRowCounts -DataSize $DataSize -CustomRowCount $CustomRowCount
@@ -122,7 +128,7 @@ Describe 'Basic FK Traversal' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
         }
         
-        It 'Should follow two-hop FK chain: Product → SubCategory → Category' {
+        It 'Should follow two-hop FK chain: Product -> SubCategory -> Category' {
             $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -137,7 +143,7 @@ Describe 'Basic FK Traversal' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
         }
         
-        It 'Should follow three-hop FK chain: OrderDetails → Order → Customer → Contact' {
+        It 'Should follow three-hop FK chain: OrderDetails -> Order -> Customer -> Contact' {
             $query = New-TestQuery -Schema 'dbo' -Table 'OrderDetails' -KeyColumns @('OrderId', 'LineNum') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -198,7 +204,7 @@ Describe 'Complex Graph Patterns' {
     
     Context 'Diamond Pattern' {
         It 'Should handle diamond pattern: Customer with multiple FK paths to Contacts' {
-            # Customer has PrimaryContactId, BillingContactId, ShippingContactId → Contacts
+            # Customer has PrimaryContactId, BillingContactId, ShippingContactId -> Contacts
             $query = New-TestQuery -Schema 'dbo' -Table 'Customers' -KeyColumns @('CustomerId') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -232,7 +238,7 @@ Describe 'Complex Graph Patterns' {
     
     Context 'Multiple Outgoing FKs' {
         It 'Should follow all outgoing FKs from Order' {
-            # Order → Customer, SalesRep, ShippingAddr, BillingAddr
+            # Order -> Customer, SalesRep, ShippingAddr, BillingAddr
             $query = New-TestQuery -Schema 'dbo' -Table 'Orders' -KeyColumns @('OrderId') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -264,7 +270,7 @@ Describe 'Complex Graph Patterns' {
     }
     
     Context 'Many-to-Many Relationships' {
-        It 'Should traverse many-to-many: Product → ProductSuppliers → Suppliers' {
+        It 'Should traverse many-to-many: Product -> ProductSuppliers -> Suppliers' {
             $query = New-TestQuery -Schema 'dbo' -Table 'ProductSuppliers' -KeyColumns @('ProductId', 'SupplierId') -Top 3
             
             $testResult = Invoke-FindSubsetTest `
@@ -279,7 +285,7 @@ Describe 'Complex Graph Patterns' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Suppliers' -MinRows 1
         }
         
-        It 'Should traverse Team ↔ Employee many-to-many' {
+        It 'Should traverse Team-Employee bidirectional many-to-many' {
             $query = New-TestQuery -Schema 'dbo' -Table 'TeamMembers' -KeyColumns @('TeamId', 'EmployeeId') -Top 3
             
             $testResult = Invoke-FindSubsetTest `
@@ -389,8 +395,8 @@ Describe 'Self-Referencing and Circular References' {
     }
     
     Context 'Circular References' {
-        It 'Should handle Employee ↔ Department circular reference' {
-            # Employee.DeptId → Department, Department.HeadId → Employee
+        It 'Should handle Employee-Department bidirectional circular reference' {
+            # Employee.DeptId -> Department, Department.HeadId -> Employee
             $query = New-TestQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -434,7 +440,7 @@ Describe 'Deep FK Chains' {
     }
     
     Context '8-Level Deep Chain' {
-        It 'Should traverse full 8-level chain: H → G → F → E → D → C → B → A' {
+        It 'Should traverse full 8-level chain: H -> G -> F -> E -> D -> C -> B -> A' {
             $query = New-TestQuery -Schema 'dbo' -Table 'DeepChainH' -KeyColumns @('Id') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -454,7 +460,7 @@ Describe 'Deep FK Chains' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'DeepChainA' -MinRows 1
         }
         
-        It 'Should traverse business chain: Payment → Invoice → Order → Customer → Contact' {
+        It 'Should traverse business chain: Payment -> Invoice -> Order -> Customer -> Contact' {
             $query = New-TestQuery -Schema 'dbo' -Table 'Payments' -KeyColumns @('PaymentId') -Top 1
             
             $testResult = Invoke-FindSubsetTest `
@@ -1296,7 +1302,7 @@ Describe 'End-to-End Database Subset Creation' {
                     -DatabaseInfo $script:DbInfo
                 
                 # Complex multi-source query covering various FK patterns:
-                # - Orders: traverses Customer → Contact, ProductVariant → Product → SubCategory → Category
+                # - Orders: traverses Customer -> Contact, ProductVariant -> Product -> SubCategory -> Category
                 # - Employees: traverses Department (circular) and manager hierarchy (self-ref)
                 # - Documents: traverses Employee author + threaded Comments
                 $queries = @(
@@ -1431,8 +1437,14 @@ Describe 'End-to-End Database Subset Creation' {
                 # =========================================================
                 Write-Host "  Verifying row counts..." -ForegroundColor Gray
                 
-                $subsetDbInfoWithSize = Get-DatabaseInfo -Database $subsetDbName -ConnectionInfo $script:Connection -MeasureSize $true
-                $copiedRows = ($subsetDbInfoWithSize.Tables | Where-Object { $_.Statistics.Rows -gt 0 } | Measure-Object -Property { $_.Statistics.Rows } -Sum).Sum
+                $rowCountSql = @"
+SELECT SUM(p.rows) AS TotalRows
+FROM sys.tables t
+INNER JOIN sys.partitions p ON t.object_id = p.object_id
+WHERE p.index_id IN (0, 1)
+"@
+                $rowCountResult = Invoke-SqlcmdEx -Sql $rowCountSql -Database $subsetDbName -ConnectionInfo $script:Connection -Statistics $false
+                $copiedRows = $rowCountResult.TotalRows
                 
                 # Copied rows should approximately match subset (allowing for some variance due to historic tables, etc.)
                 $copiedRows | Should -BeGreaterThan 0 -Because "Subset database should contain data"
