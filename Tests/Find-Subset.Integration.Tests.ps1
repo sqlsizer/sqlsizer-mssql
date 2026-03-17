@@ -1267,6 +1267,375 @@ Describe 'Multiple Starting Queries' {
 }
 
 # =====================================================
+# Pending State Resolution Tests
+# Tests for the fix that moved Resolve-PendingStates
+# from inside each iteration to after traversal completes.
+# =====================================================
+
+Describe 'Pending State Resolution' {
+    AfterEach {
+        if ($testResult -and $testResult.SessionId) {
+            Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+        if ($sessionId) {
+            Remove-TestSession -SessionId $sessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+            $sessionId = $null
+        }
+    }
+
+    Context 'Pending states resolved after full traversal' {
+        It 'Should correctly exclude Pending rows not reachable via Include path' {
+            # Start with a Category (Include state, FullSearch=false)
+            # Incoming FKs (SubCategories -> Categories) create Pending states
+            # After traversal, those Pending states should be resolved to Exclude
+            $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
+                -Where "[`$table].ParentCategoryId IS NULL" -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            # SubCategories should be excluded (incoming FK, FullSearch=false, Pending -> Exclude)
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories'
+        }
+
+        It 'Should promote Pending to Include when reachable via Include path' {
+            # Start with OrderDetail (Include) - it references both Order and ProductVariant
+            # Order is reachable via outgoing FK from OrderDetail (Include path)
+            # Customer is reachable from Order via outgoing FK (Include path)
+            # All should be Include, not left as Pending
+            $query = New-TestQuery -Schema 'dbo' -Table 'OrderDetails' -KeyColumns @('OrderId', 'LineNum') -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'OrderDetails' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Orders' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+        }
+
+        It 'Should handle multi-path convergence without premature Pending resolution' {
+            # Start from two different tables that both lead to the same dependency
+            # The fix ensures Pending resolution happens AFTER all paths are explored,
+            # so a record initially marked Pending from one path can be promoted to Include from another
+            $queryProduct = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
+            $queryOrder = New-TestQuery -Schema 'dbo' -Table 'Orders' -KeyColumns @('OrderId') -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($queryProduct, $queryOrder) `
+                -FullSearch $false
+
+            $testResult.Success | Should -Be $true
+            # Both starting tables should be present
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Orders' -MinRows 1
+            # Customer (from Order) should be included via outgoing FK
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+            # SubCategory (from Product) should be included via outgoing FK
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+        }
+    }
+
+    Context 'Interactive mode Pending resolution' {
+        It 'Should resolve Pending states only when traversal is complete in interactive mode' {
+            $sessionId = New-TestSession `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo
+
+            # Use IncludeFull to trigger incoming FK traversal (creates Pending states)
+            $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
+                -State ([TraversalState]::IncludeFull) `
+                -Where "[`$table].ParentCategoryId IS NULL" -Top 1
+
+            Initialize-StartSet `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -Queries @($query) `
+                -DatabaseInfo $script:DbInfo `
+                -SessionId $sessionId
+
+            # Initialize
+            Find-Subset `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -SessionId $sessionId `
+                -Interactive $true `
+                -Iteration 0
+
+            # Run until finished
+            $iteration = 1
+            $maxIterations = 50
+            $finished = $false
+
+            while (-not $finished -and $iteration -lt $maxIterations) {
+                $result = Find-Subset `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId `
+                    -Interactive $true `
+                    -Iteration $iteration
+
+                $finished = $result.Finished
+                $iteration++
+            }
+
+            $finished | Should -Be $true
+
+            # Get summary - IncludeFull should have included SubCategories via incoming FK
+            $summary = Get-SubsetSummary `
+                -SessionId $sessionId `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo
+
+            Assert-SubsetContains -SubsetSummary $summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+        }
+
+        It 'Should not have Pending states after interactive traversal completes' {
+            $sessionId = New-TestSession `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo
+
+            $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 3
+
+            Initialize-StartSet `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -Queries @($query) `
+                -DatabaseInfo $script:DbInfo `
+                -SessionId $sessionId
+
+            # Initialize
+            Find-Subset `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -SessionId $sessionId `
+                -Interactive $true `
+                -Iteration 0
+
+            # Run until finished
+            $iteration = 1
+            $maxIterations = 50
+            $finished = $false
+
+            while (-not $finished -and $iteration -lt $maxIterations) {
+                $result = Find-Subset `
+                    -Database $script:TestDatabase `
+                    -ConnectionInfo $script:Connection `
+                    -DatabaseInfo $script:DbInfo `
+                    -SessionId $sessionId `
+                    -Interactive $true `
+                    -Iteration $iteration
+
+                $finished = $result.Finished
+                $iteration++
+            }
+
+            $finished | Should -Be $true
+
+            # Verify no Pending states remain in any processing table
+            $structure = [Structure]::new($script:DbInfo)
+            $pendingState = [int][TraversalState]::Pending
+            $totalPending = 0
+
+            foreach ($table in $script:DbInfo.Tables) {
+                if ($table.PrimaryKey.Count -eq 0) { continue }
+                $signature = $structure.Tables[$table]
+                $processing = $structure.GetProcessingName($signature, $sessionId)
+                $countSql = "SELECT COUNT(*) AS Cnt FROM $processing WHERE [State] = $pendingState"
+                try {
+                    $countResult = Invoke-SqlcmdEx -Sql $countSql -Database $script:TestDatabase -ConnectionInfo $script:Connection -Silent $true
+                    if ($null -ne $countResult -and $null -ne $countResult.Cnt) {
+                        $totalPending += $countResult.Cnt
+                    }
+                }
+                catch {
+                    # Processing table may not exist for tables not in subset - ignore
+                }
+            }
+
+            $totalPending | Should -Be 0 -Because "All Pending states should be resolved after traversal completes"
+        }
+    }
+}
+
+# =====================================================
+# Session Isolation Tests
+# Tests that removing script-scoped variables ensures
+# concurrent sessions don't interfere with each other.
+# =====================================================
+
+Describe 'Session Isolation' {
+    AfterEach {
+        if ($testResult1 -and $testResult1.SessionId) {
+            Remove-TestSession -SessionId $testResult1.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+        if ($testResult2 -and $testResult2.SessionId) {
+            Remove-TestSession -SessionId $testResult2.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+    }
+
+    Context 'Independent sessions produce correct results' {
+        It 'Should produce identical results across separate sessions with same query' {
+            $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 2
+
+            $testResult1 = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult2 = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult1.Success | Should -Be $true
+            $testResult2.Success | Should -Be $true
+
+            # Both sessions should have the same tables in their subsets
+            $tables1 = ($testResult1.Summary.Keys | Sort-Object)
+            $tables2 = ($testResult2.Summary.Keys | Sort-Object)
+            $tables1 | Should -Be $tables2
+
+            # Row counts should match for each table
+            foreach ($key in $testResult1.Summary.Keys) {
+                $testResult1.Summary[$key] | Should -Be $testResult2.Summary[$key] `
+                    -Because "Table $key should have same row count in both sessions"
+            }
+        }
+
+        It 'Should keep different queries isolated across sessions' {
+            # Session 1: Products query (reaches SubCategories, Categories)
+            $query1 = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
+
+            # Session 2: Employees query (reaches Departments, Contacts)
+            $query2 = New-TestQuery -Schema 'dbo' -Table 'Employees' -KeyColumns @('EmployeeId') -Top 1
+
+            $testResult1 = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query1) `
+                -FullSearch $false
+
+            $testResult2 = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query2) `
+                -FullSearch $false
+
+            $testResult1.Success | Should -Be $true
+            $testResult2.Success | Should -Be $true
+
+            # Session 1 should have Products but not necessarily Employees
+            Assert-SubsetContains -SubsetSummary $testResult1.Summary -Schema 'dbo' -Table 'Products' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult1.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+
+            # Session 2 should have Employees but not necessarily Products
+            Assert-SubsetContains -SubsetSummary $testResult2.Summary -Schema 'dbo' -Table 'Employees' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult2.Summary -Schema 'dbo' -Table 'Departments' -MinRows 1
+        }
+    }
+}
+
+# =====================================================
+# Query Cache Removal Tests
+# Tests that correct results are produced without the
+# query cache (removed in recent refactor).
+# =====================================================
+
+Describe 'Multiple Path Traversal (No Cache)' {
+    AfterEach {
+        if ($testResult -and $testResult.SessionId) {
+            Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+    }
+
+    Context 'Same table reached from multiple paths' {
+        It 'Should correctly include table reachable via different FK paths' {
+            # OrderDetail -> Order -> Customer -> Contact
+            # OrderDetail -> ProductVariant -> Product -> Supplier -> Contact (via PrimaryContactId)
+            # Contact is reached via multiple paths; without caching, each path generates fresh queries
+            $query = New-TestQuery -Schema 'dbo' -Table 'OrderDetails' -KeyColumns @('OrderId', 'LineNum') -Top 3
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'OrderDetails' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Orders' -MinRows 1
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+        }
+
+        It 'Should handle repeated traversal of self-referencing table' {
+            # Categories has self-ref FK. Multiple levels of the hierarchy
+            # means the same table is traversed multiple times with different data.
+            # Without cache, each traversal generates a fresh query (correct for different data).
+            $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') -Top 3
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $false
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            $testResult.Result.Finished | Should -Be $true
+        }
+
+        It 'Should produce correct results with FullSearch traversing same table via outgoing and incoming' {
+            # With FullSearch, a table can be traversed for both outgoing and incoming FKs.
+            # Without cache, each direction generates a fresh query.
+            $query = New-TestQuery -Schema 'dbo' -Table 'SubCategories' -KeyColumns @('SubCategoryId') -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -FullSearch $true
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories' -MinRows 1
+            # Outgoing: SubCategory -> Category
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
+            # Incoming: Products -> SubCategory (FullSearch includes incoming)
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Products' -MinRows 1
+        }
+    }
+}
+
+# =====================================================
 # End-to-End Database Subset Test
 # =====================================================
 
