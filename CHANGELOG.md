@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 - **Removed legacy types**: `enum Color`, `ColorMap`, `ColorItem`, `ForcedColor`, `Query`, `TableInfo2WithColor`
-- Functions now require `Query2[]` instead of `Query[]`: `Find-UnreachableTables`, `Test-Queries`, `Find-ReachableTables`, `Enable-ReachableIndexes`, `Disable-ReachableIndexes`, `Install-ForeignKeyIndexes`
+- Functions now require `SqlSizerQuery[]` instead of `Query[]`: `Find-UnreachableTables`, `Test-Queries`, `Find-ReachableTables`, `Enable-ReachableIndexes`, `Disable-ReachableIndexes`, `Install-ForeignKeyIndexes`
 - `Find-UnreachableTables` and `Test-Queries` now use `TraversalConfiguration` instead of `ColorMap`
 - Database column `[Color]` renamed to `[State]` in all SQL DDL
 
@@ -137,7 +137,7 @@ Key milestones in earlier versions:
 ## Migration Notes
 
 ### To Version 2.0.2
-1. Replace `Query` with `Query2` and use `.State` instead of `.Color`
+1. Replace `Query` with `SqlSizerQuery` and use `.State` instead of `.Color`
 2. Replace `ColorMap` with `TraversalConfiguration` 
 3. Replace `ColorItem` with `TraversalRule`
 4. Replace `ForcedColor` with `StateOverride`
@@ -155,7 +155,7 @@ Key milestones in earlier versions:
 
 ### Backward Compatibility
 All original functions remain available but require updated types:
-- `Find-Subset` - Uses `Query2` and `TraversalConfiguration`
+- `Find-Subset` - Uses `SqlSizerQuery` and `TraversalConfiguration`
 - `Find-RemovalSubset` - Removal algorithm (still supported)
 
 ## Contributing

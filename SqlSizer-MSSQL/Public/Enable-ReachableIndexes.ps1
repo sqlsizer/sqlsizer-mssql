@@ -4,7 +4,7 @@ function Enable-ReachableIndexes
     param
     (
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
 
         [Parameter(Mandatory = $true)]
         [string]$Database,

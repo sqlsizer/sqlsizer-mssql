@@ -15,7 +15,7 @@ $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 
 # Phase 1
 $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info -ForceInstallation $true
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
 $query.Schema = "Person"
 $query.Table = "Person"
@@ -32,7 +32,7 @@ $null = Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInf
 
 # Phase 2
 $sessionId2 = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.Schema = "Person"
 $query.Table = "Address"
 $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal traversal

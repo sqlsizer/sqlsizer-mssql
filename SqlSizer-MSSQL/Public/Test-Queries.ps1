@@ -8,7 +8,7 @@ function Test-Queries
         [string]$Database,
 
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
 
         [Parameter(Mandatory = $false)]
         [TraversalConfiguration]$TraversalConfig = $null,

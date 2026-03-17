@@ -220,7 +220,7 @@ function Assert-SubsetRowCount {
 function New-TestQuery {
     <#
     .SYNOPSIS
-        Creates a Query2 object for initializing start sets.
+        Creates a SqlSizerQuery object for initializing start sets.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -242,7 +242,7 @@ function New-TestQuery {
         [int]$Top = 0
     )
     
-    $query = New-Object Query2
+    $query = New-Object SqlSizerQuery
     $query.State = $State
     $query.Schema = $Schema
     $query.Table = $Table
@@ -272,7 +272,7 @@ function Invoke-FindSubsetTest {
         [DatabaseInfo]$DatabaseInfo,
         
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
         
         [Parameter(Mandatory = $false)]
         [bool]$FullSearch = $false,
@@ -517,7 +517,7 @@ function Invoke-FindRemovalSubsetTest {
         [DatabaseInfo]$DatabaseInfo,
         
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
         
         [Parameter(Mandatory = $false)]
         [int]$MaxBatchSize = -1
@@ -582,7 +582,7 @@ function Invoke-FindRemovalSubsetTest {
 function New-RemovalQuery {
     <#
     .SYNOPSIS
-        Creates a Query2 object with InboundOnly state for removal operations.
+        Creates a SqlSizerQuery object with InboundOnly state for removal operations.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -601,7 +601,7 @@ function New-RemovalQuery {
         [int]$Top = 0
     )
     
-    $query = New-Object Query2
+    $query = New-Object SqlSizerQuery
     $query.State = [TraversalState]::InboundOnly
     $query.Schema = $Schema
     $query.Table = $Table

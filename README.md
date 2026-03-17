@@ -29,7 +29,7 @@ $info = Get-DatabaseInfo -Database "MyDB" -ConnectionInfo $connection
 $sessionId = Start-SqlSizerSession -Database "MyDB" -ConnectionInfo $connection -DatabaseInfo $info
 
 # 2. Define seed records
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include
 $query.Schema = "Sales"
 $query.Table = "Customer"

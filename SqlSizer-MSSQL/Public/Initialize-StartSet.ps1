@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Initializes the starting set of rows for subset extraction using Query2 objects with TraversalState.
+    Initializes the starting set of rows for subset extraction using SqlSizerQuery objects with TraversalState.
 
 .DESCRIPTION
     Executes queries to identify and mark the initial set of rows according to their specified TraversalState.
-    Respects the Query2.State property, allowing you to define starting sets with 
+    Respects the SqlSizerQuery.State property, allowing you to define starting sets with 
     different traversal behaviors:
     
     - TraversalState.Pending: Records need evaluation (for forward subset finding)
@@ -16,7 +16,7 @@
     Find-RemovalSubset execution.
 
 .PARAMETER Queries
-    Array of Query2 objects defining the starting set selection criteria (Schema, Table, 
+    Array of SqlSizerQuery objects defining the starting set selection criteria (Schema, Table, 
     KeyColumns, WHERE clause, TOP, ORDER BY, State). At least one query is required.
 
 .PARAMETER Database
@@ -43,7 +43,7 @@
 
 .EXAMPLE
     # Forward traversal (subset finding)
-    $query = New-Object -TypeName Query2
+    $query = New-Object -TypeName SqlSizerQuery
     $query.State = [TraversalState]::Pending
     $query.Schema = "Person"
     $query.Table = "Person"
@@ -57,7 +57,7 @@
 
 .EXAMPLE
     # Removal traversal (data removal)
-    $query = New-Object -TypeName Query2
+    $query = New-Object -TypeName SqlSizerQuery
     $query.State = [TraversalState]::InboundOnly
     $query.Schema = "Person"
     $query.Table = "Person"
@@ -68,7 +68,7 @@
     Write-Host "Initialized $($result.TotalRowsInserted) rows for removal"
 
 .NOTES
-    - Query2.State property is RESPECTED - rows are marked with the specified TraversalState
+    - SqlSizerQuery.State property is RESPECTED - rows are marked with the specified TraversalState
     - Use TraversalState.Pending for forward subset finding (Find-Subset)
     - Use TraversalState.InboundOnly for removal operations (Find-RemovalSubset)
     - Each query must specify Schema, Table, KeyColumns, and State
@@ -81,7 +81,7 @@ function Initialize-StartSet
     param
     (
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
 
         [Parameter(Mandatory = $true)]
         [string]$Database,
@@ -121,7 +121,7 @@ function Initialize-StartSet
         # Validate State is set
         if ($null -eq $query.State)
         {
-            throw "Query2 must specify a State property for table $($query.Schema).$($query.Table)"
+            throw "SqlSizerQuery must specify a State property for table $($query.Schema).$($query.Table)"
         }
     }
 
@@ -205,7 +205,7 @@ function Initialize-StartSet
         $sql += "$keyColumns, "
 
         # Add state and metadata columns
-        # State: Use the TraversalState specified in Query2.State property
+        # State: Use the TraversalState specified in SqlSizerQuery.State property
         # ParentTable: NULL (no parent for starting set)
         # ParentIteration: 0 (starting iteration)
         # ChildTable: NULL (no child yet)

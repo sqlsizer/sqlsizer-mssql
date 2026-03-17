@@ -29,7 +29,7 @@ $startIteration = 0
 while ($true)
 {
     # Define start set
-    $query = New-Object -TypeName Query2
+    $query = New-Object -TypeName SqlSizerQuery
     $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
     $query.Schema = "Person"
     $query.Table = "Person"
@@ -53,7 +53,7 @@ while ($true)
     $i += $step
 }
 
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
 $query.Schema = "Person"
 $query.Table = "Person"

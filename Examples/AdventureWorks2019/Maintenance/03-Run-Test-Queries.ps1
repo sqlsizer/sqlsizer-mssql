@@ -11,7 +11,7 @@ $connection = New-SqlConnectionInfo -Server $server -Username $username -Passwor
 $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 
 # Query 1: All persons with first name = 'Michael'
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
 $query.Schema = "Person"
 $query.Table = "Person"

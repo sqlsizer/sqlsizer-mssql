@@ -34,7 +34,7 @@ $info = Get-DatabaseInfo -Database "MyDatabase" -ConnectionInfo $connection
 $sessionId = Start-SqlSizerSession -Database "MyDatabase" -ConnectionInfo $connection -DatabaseInfo $info
 
 # 4. Define your seed records
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include
 $query.Schema = "Sales"
 $query.Table = "Customer"
@@ -260,7 +260,7 @@ SqlSizer-MSSQL/
 │  │  STEP 2: DEFINE SEED RECORDS                                    │   │
 │  ├─────────────────────────────────────────────────────────────────┤   │
 │  │                                                                  │   │
-│  │  Query2 object(s) ─────► Initialize-StartSet                    │   │
+│  │  SqlSizerQuery object(s) ─────► Initialize-StartSet                    │   │
 │  │   • State (Include/Exclude/Pending)                             │   │
 │  │   • Schema + Table                                               │   │
 │  │   • Where clause                                                 │   │
@@ -372,7 +372,7 @@ This design enables:
 
 ```powershell
 # Example: Start with 10 customers named 'John'
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include
 $query.Schema = "Sales"
 $query.Table = "Customer"
@@ -585,10 +585,10 @@ class TableFk {
 }
 ```
 
-### Query2 (Seed Record Definition)
+### SqlSizerQuery (Seed Record Definition)
 
 ```powershell
-class Query2 {
+class SqlSizerQuery {
     [TraversalState]$State     # Include, Exclude, Pending, InboundOnly, or IncludeFull
     [string]$Schema            # Target table schema
     [string]$Table             # Target table name
@@ -682,7 +682,7 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $conn
 
 ```powershell
 # Select 50 random active customers
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include
 $query.Schema = "Sales"
 $query.Table = "Customer"
@@ -709,7 +709,7 @@ Copy-DataFromSubset -SourceDatabase "Production" -DestinationDatabase "Developme
 
 ```powershell
 # Mark customer for removal
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::InboundOnly  # Only find what depends on this
 $query.Schema = "Sales"
 $query.Table = "Customer"
@@ -790,7 +790,7 @@ $sessionId = Start-SqlSizerSession -Database "Production" `
 
 try {
     # 4. Define starting records
-    $query = New-Object -TypeName Query2
+    $query = New-Object -TypeName SqlSizerQuery
     $query.State = [TraversalState]::Include
     $query.Schema = "Sales"
     $query.Table = "SalesOrder"
@@ -835,7 +835,7 @@ $sessionId = Start-SqlSizerSession -Database $db -ConnectionInfo $connection -Da
 
 try {
     # Define records to remove
-    $query = New-Object -TypeName Query2
+    $query = New-Object -TypeName SqlSizerQuery
     $query.State = [TraversalState]::InboundOnly
     $query.Schema = "Person"
     $query.Table = "Person"

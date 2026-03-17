@@ -40,7 +40,7 @@ class Condition
     [string]$FkName = ""
 }
 
-class Query2
+class SqlSizerQuery
 {
     [TraversalState]$State
     [string]$Schema

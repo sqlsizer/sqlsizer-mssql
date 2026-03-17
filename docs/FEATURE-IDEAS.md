@@ -29,7 +29,7 @@
 
 | # | Feature | Details | Effort |
 |---|---------|---------|--------|
-| 5 | **`New-Query2` convenience function** | Replace the verbose `New-Object -TypeName Query2` + property-setting pattern with `New-Query2 -Schema "Sales" -Table "Customer" -State Include -Top 10 -Where "..."`. Much better developer experience. | 2 hrs |
+| 5 | **`New-SqlSizerQuery` convenience function** | Replace the verbose `New-Object -TypeName SqlSizerQuery` + property-setting pattern with `New-SqlSizerQuery -Schema "Sales" -Table "Customer" -State Include -Top 10 -Where "..."`. Much better developer experience. | 2 hrs |
 | 6 | **`New-TraversalConfiguration` convenience function** | Same builder pattern — a single function call instead of manual object construction. | 2 hrs |
 | 7 | **Configurable query timeout** | `Invoke-SqlcmdEx` hardcodes `QueryTimeout = 65535`. Should accept a parameter or read from `SqlConnectionInfo`. | 1 hr |
 | 8 | **SQL INSERT script export** | Add `Get-SubsetTableSql` that generates `INSERT INTO` statements — useful for applying subsets without SqlSizer installed on the target. | 4–6 hrs |

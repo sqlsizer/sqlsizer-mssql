@@ -20,7 +20,7 @@ Install-SqlSizer -Database $database -ConnectionInfo $connection -DatabaseInfo $
 
 # Define start set
 # Query 1: All persons with first name = 'Rob'
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
 $query.Schema = "Person"
 $query.Table = "Person"

@@ -18,7 +18,7 @@ $sessionId2 = Start-SqlSizerSession -Database $database -ConnectionInfo $connect
 
 # Find subset
 # Query 1: top 100 persons with peron types EM
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
 $query.Schema = "Person"
 $query.Table = "Person"
@@ -32,7 +32,7 @@ Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info 
 $subset1 = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Query 2: All persons with first name = 'Wanida'
-$query2 = New-Object -TypeName Query2
+$query2 = New-Object -TypeName SqlSizerQuery
 $query2.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
 $query2.Schema = "Person"
 $query2.Table = "Person"

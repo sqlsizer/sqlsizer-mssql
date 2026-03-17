@@ -17,7 +17,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Define start set
 # Query 1: All persons with first name = 'Michael'
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
 $query.Schema = "Person"
 $query.Table = "Person"

@@ -4,7 +4,7 @@ function Find-UnreachableTables
     param
     (
         [Parameter(Mandatory = $true)]
-        [Query2[]]$Queries,
+        [SqlSizerQuery[]]$Queries,
 
         [Parameter(Mandatory = $false)]
         [TraversalConfiguration]$TraversalConfig = $null,

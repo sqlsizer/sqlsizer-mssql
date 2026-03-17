@@ -18,7 +18,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 # Define start set
 
 # Query 1: 10 persons with first name = 'John'
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include  
 $query.Schema = "Person"
 $query.Table = "Person"

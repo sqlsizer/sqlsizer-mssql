@@ -16,7 +16,7 @@ $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
 # 4. Define what records to start with
-$query = New-Object -TypeName Query2
+$query = New-Object -TypeName SqlSizerQuery
 $query.State = [TraversalState]::Include  # Include these records and their dependencies
 $query.Schema = "Person"
 $query.Table = "Person"
