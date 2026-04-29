@@ -11,6 +11,9 @@ function Export-SubsetImpactReport
     .PARAMETER Path
         Destination file path.
 
+    .PARAMETER FilePath
+        Alias for Path, kept for compatibility with older examples.
+
     .PARAMETER Format
         Output format: Json, Markdown, or Html.
 
@@ -34,6 +37,7 @@ function Export-SubsetImpactReport
         [SqlConnectionInfo]$ConnectionInfo,
 
         [Parameter(Mandatory = $true)]
+        [Alias('FilePath')]
         [string]$Path,
 
         [Parameter(Mandatory = $false)]

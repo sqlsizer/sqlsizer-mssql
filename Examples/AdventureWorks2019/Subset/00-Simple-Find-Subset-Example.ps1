@@ -1,5 +1,9 @@
 ## Simple example showing basic usage of Find-Subset
 
+# Load the local module manifest so SqlSizer classes/enums are available to this script.
+$modulePath = Join-Path $PSScriptRoot "..\..\..\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1"
+Import-Module $modulePath -Force -Global
+
 # Connection settings
 $server = "localhost"
 $database = "AdventureWorks2019"
@@ -13,7 +17,7 @@ $connection = New-SqlConnectionInfo -Server $server -Username $username -Passwor
 $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 
 # 3. Create a session to track this subset operation
-$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info
+$sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info -ForceInstallation $true
 
 # 4. Define what records to start with
 $query = New-Object -TypeName SqlSizerQuery
@@ -31,6 +35,9 @@ Initialize-StartSet -Database $database -ConnectionInfo $connection `
 # 6. Find the minimal dependency closure by following outgoing foreign key relationships
 Find-Subset -Database $database -ConnectionInfo $connection `
     -DatabaseInfo $info -SessionId $sessionId
+
+Export-SubsetImpactReport -Database $database -ConnectionInfo $connection `
+    -DatabaseInfo $info -SessionId $sessionId -Path "SubsetImpactReport.html" -Format Markdown
 
 # 7. Get the results - which tables and how many rows in each
 $subsetTables = Get-SubsetTables -Database $database -ConnectionInfo $connection `
