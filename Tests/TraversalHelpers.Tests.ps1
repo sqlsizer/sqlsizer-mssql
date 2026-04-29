@@ -182,6 +182,9 @@ Describe 'Get-TraversalConstraints' {
 
         $result.MaxDepth | Should -BeNullOrEmpty
         $result.Top | Should -BeNullOrEmpty
+        $result.SourceSchemaName | Should -BeNullOrEmpty
+        $result.SourceTableName | Should -BeNullOrEmpty
+        $result.ForeignKeyName | Should -BeNullOrEmpty
     }
 
     It 'Returns MaxDepth when configured' {
@@ -233,6 +236,74 @@ Describe 'Get-TraversalConstraints' {
 
         $result.MaxDepth | Should -Be 5
         $result.Top | Should -Be 50
+    }
+
+    It 'Returns source and FK filters when configured' {
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.Constraints = New-Object TraversalConstraints
+        $rule.Constraints.SourceSchemaName = 'Sales'
+        $rule.Constraints.SourceTableName = 'Customers'
+        $rule.Constraints.ForeignKeyName = 'FK_Orders_Customers'
+        $config.Rules = @($rule)
+
+        $result = Get-TraversalConstraints `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -TraversalConfiguration $config
+
+        $result.SourceSchemaName | Should -Be 'Sales'
+        $result.SourceTableName | Should -Be 'Customers'
+        $result.ForeignKeyName | Should -Be 'FK_Orders_Customers'
+    }
+}
+
+Describe 'Test-TraversalConstraintsMatch' {
+    It 'Returns true when no filters are configured' {
+        $result = Test-TraversalConstraintsMatch `
+            -Constraints @{ MaxDepth = 3 } `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Orders' `
+            -ForeignKeyName 'FK_Orders_Customers'
+
+        $result | Should -Be $true
+    }
+
+    It 'Returns true when source and FK filters match' {
+        $result = Test-TraversalConstraintsMatch `
+            -Constraints @{
+                SourceSchemaName = 'dbo'
+                SourceTableName = 'Orders'
+                ForeignKeyName = 'FK_Orders_Customers'
+            } `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Orders' `
+            -ForeignKeyName 'FK_Orders_Customers'
+
+        $result | Should -Be $true
+    }
+
+    It 'Returns false when source filter does not match' {
+        $result = Test-TraversalConstraintsMatch `
+            -Constraints @{
+                SourceSchemaName = 'Sales'
+                SourceTableName = 'Orders'
+            } `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Orders' `
+            -ForeignKeyName 'FK_Orders_Customers'
+
+        $result | Should -Be $false
+    }
+
+    It 'Returns false when FK filter does not match' {
+        $result = Test-TraversalConstraintsMatch `
+            -Constraints @{ ForeignKeyName = 'FK_Other' } `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Orders' `
+            -ForeignKeyName 'FK_Orders_Customers'
+
+        $result | Should -Be $false
     }
 }
 

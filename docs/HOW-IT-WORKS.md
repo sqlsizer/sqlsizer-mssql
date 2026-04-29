@@ -294,7 +294,7 @@ Available constraints:
 | Constraint | Default | Description |
 |------------|---------|-------------|
 | `MaxDepth` | `-1` (unlimited) | Stop traversal after N hops from source |
-| `Top` | `-1` (unlimited) | Limit discovered rows to N |
+| `Top` | `-1` (unlimited) | Limit discovered rows to N, ordered by target primary key for repeatability |
 | `SourceSchemaName` + `SourceTableName` | `""` (any) | Only process when source matches |
 | `ForeignKeyName` | `""` (any) | Only process via this specific FK |
 
@@ -422,7 +422,7 @@ SqlSizer-MSSQL/
 │  │  STEP 3: TRAVERSAL                                              │   │
 │  ├─────────────────────────────────────────────────────────────────┤   │
 │  │                                                                  │   │
-│  │  Find-Subset ──────────► Graph traversal (BFS/DFS)              │   │
+│  │  Find-Subset ──────────► Graph traversal (BFS/size-first)       │   │
 │  │   • Follows FK relationships                                    │   │
 │  │   • Populates processing tables                                 │   │
 │  │   • Resolves Pending states                                     │   │
@@ -620,7 +620,7 @@ NULL (pending) → 0 (in-progress) → 1 (completed)
 │                                                                         │
 │   ┌─────────┐     ┌──────────────────┐     ┌───────────────┐          │
 │   │  Seed   │ ──► │   Follow FKs     │ ──► │   Resolve     │          │
-│   │ Records │     │  (BFS or DFS)    │     │   Pending     │          │
+│   │ Records │     │(BFS/size-first)  │     │   Pending     │          │
 │   └─────────┘     └──────────────────┘     └───────────────┘          │
 │                           │                        │                   │
 │   Duration: Fast          │ Duration: Main work    │ Duration: Fast   │
@@ -660,7 +660,7 @@ Initialize-StartSet -Database $db -Queries @($query) -SessionId $sessionId `
 
 ### Phase 2: Graph Traversal
 
-The algorithm uses **Breadth-First Search (BFS)** by default, or optionally **Depth-First Search (DFS)**:
+The algorithm uses **Breadth-First Search (BFS)** by default. The legacy `UseDfs` switch preserves its historical size-first ordering, which prioritizes the operation with the most remaining rows rather than doing strict depth-first traversal:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -706,12 +706,11 @@ The algorithm uses **Breadth-First Search (BFS)** by default, or optionally **De
 
 ```
 Build hashtable lookups for tables, FKs (O(1) access)
-Initialize query cache (empty)
 
 WHILE unprocessed operations exist:
     1. Get-NextOperation: SELECT TOP 1 from Operations
        - BFS: ORDER BY Depth ASC, RemainingRecords DESC
-       - DFS: ORDER BY RemainingRecords DESC
+       - UseDfs legacy ordering: ORDER BY RemainingRecords DESC
 
     2. Set-OperationInProgress: Mark Status = 0, advance Processed count
 
@@ -719,8 +718,7 @@ WHILE unprocessed operations exist:
        a. Test-ShouldTraverseDirection for outgoing
        b. Test-ShouldTraverseDirection for incoming
        c. For each direction enabled:
-          - Check query cache (key: "schema_table_state_direction")
-          - If miss: generate CTE queries for all FKs
+          - Generate CTE queries for matching FKs
           - Batch all FK queries into single SQL execution
        d. Execute batched SQL (reduces round-trips)
 
@@ -736,11 +734,11 @@ WHILE unprocessed operations exist:
     7. Increment iteration counter
 ```
 
-**BFS vs DFS:**
+**Traversal order:**
 | Algorithm | Parameter | `ORDER BY` | Best For |
 |-----------|-----------|------------|----------|
 | **BFS** | `UseDfs = $false` | `Depth ASC, RemainingRecords DESC` | Even discovery, predictable progress |
-| **DFS** | `UseDfs = $true` | `RemainingRecords DESC` | Early results, deep narrow graphs |
+| **Legacy size-first** | `UseDfs = $true` | `RemainingRecords DESC` | Prioritizing the largest queued operation |
 
 ### Phase 3: Output Closure
 
@@ -1816,7 +1814,6 @@ The internal `Invoke-SqlcmdEx` function handles Azure transparently:
 | Optimization | Description |
 |--------------|-------------|
 | **CTE-based queries** | Better query plan optimization by SQL Server |
-| **Query caching** | Same table/state/direction combinations reuse generated SQL |
 | **Batch processing** | Configurable `MaxBatchSize` for controlled resource usage |
 | **Batched FK queries** | Multiple FK relationships processed in single SQL execution |
 | **Indexed processing tables** | Key columns + State (or Depth) indexed for fast lookups |
@@ -1830,7 +1827,7 @@ The internal `Invoke-SqlcmdEx` function handles Azure transparently:
 | Complex schemas (>100 tables) | Start with `FullSearch = $false`, expand if needed |
 | Slow performance | Check for missing indexes on FK columns |
 | Azure SQL | Connection already optimized for cloud |
-| Memory pressure | Use DFS (`UseDfs = $true`) for lower memory footprint |
+| Large queued operations | Use `UseDfs = $true` to prioritize the largest remaining operation |
 | Long-running traversals | Enable checkpointing with `-CheckpointPath` |
 | High-fanout tables | Use `TraversalConfiguration` with `MaxDepth` or `Top` limits |
 
@@ -1948,7 +1945,7 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 | **Iteration** | Processing cycle number when record was discovered |
 | **Operation** | A unit of work in `SqlSizer.Operations`: process N rows from one table/state/depth |
 | **BFS** | Breadth-First Search - processes all records at same depth before going deeper |
-| **DFS** | Depth-First Search - follows one path fully before exploring alternatives |
+| **UseDfs** | Legacy size-first traversal ordering - processes the queued operation with the most remaining rows |
 | **CTE** | Common Table Expression - SQL feature for readable subqueries |
 | **TraversalConfiguration** | Object for customizing per-table traversal behavior (rules, constraints, ignores) |
 | **StateOverride** | Forces a specific TraversalState for a table, bypassing normal transition logic |

@@ -74,6 +74,7 @@ Invoke-Pester -Configuration $config
 - **TraversalHelpers.Tests.ps1** - Tests for pure helper functions
   - `Get-NewTraversalState` - State transition logic
   - `Get-TraversalConstraints` - Constraint retrieval
+  - `Test-TraversalConstraintsMatch` - Source/FK filter matching
   - `Test-ShouldTraverseDirection` - Traversal decision logic
   - `Get-TopClause` - SQL TOP clause generation
   - `Get-ForeignKeyRelationships` - FK relationship extraction
@@ -84,7 +85,7 @@ Invoke-Pester -Configuration $config
   - `Get-IncludedTraversalStateValues` / `Get-IncludedTraversalStateSqlList` - Output closure state filters
 
 - **QueryBuilders.Tests.ps1** - Tests for SQL query builders
-  - `New-GetNextOperationQuery` - BFS/DFS query generation
+  - `New-GetNextOperationQuery` - BFS/legacy size-first query generation
   - `New-MarkOperationInProgressQuery` - Operation marking
   - `New-CompleteOperationsQuery` - Operation completion
   - `New-GetIterationStatisticsQuery` - Statistics retrieval
@@ -109,7 +110,7 @@ Invoke-Pester -Configuration $config
   - Output closure state filtering
   - TraversalConfiguration (MaxDepth, Top, StateOverride)
   - IgnoredTables
-  - BFS vs DFS comparison
+  - BFS vs legacy size-first comparison
   - MaxBatchSize chunking
   - Interactive mode
   - Subset impact report and JSON/Markdown/HTML exports

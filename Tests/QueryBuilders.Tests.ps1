@@ -13,7 +13,7 @@ BeforeAll {
 }
 
 Describe 'New-GetNextOperationQuery' {
-    It 'Generates DFS query when UseDfs is true' {
+    It 'Generates legacy size-first query when UseDfs is true' {
         $result = New-GetNextOperationQuery `
             -SessionId 'TEST-SESSION-123' `
             -UseDfs $true
@@ -262,7 +262,15 @@ Describe 'New-ExcludePendingQuery' {
             -ProcessingTable 'SqlSizer.Custom_Table' `
             -TableInfo $mockTableInfo
 
-        $result | Should -Match 'UPDATE SqlSizer\.Custom_Table'
+        $result | Should -Match 'UPDATE \[SqlSizer\]\.\[Custom_Table\]'
+    }
+
+    It 'Returns excluded row count' {
+        $result = New-ExcludePendingQuery `
+            -ProcessingTable 'SqlSizer.Processing_Orders' `
+            -TableInfo $mockTableInfo
+
+        $result | Should -Match 'SELECT @ExcludedCount AS ExcludedCount'
     }
 
     It 'Includes GO statement' {
@@ -395,14 +403,16 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -FullSearch $false
 
         $result | Should -Match 'ROW_NUMBER\(\) OVER'
+        $result | Should -Match 'PARTITION BY o\.Id'
+        $result | Should -Match 'FROM \[SqlSizer\]\.\[Proc_Source\] src'
         $result | Should -Match 'o\.\[Table\] = 1'
         $result | Should -Match 'o\.\[State\] = src\.\[State\]'
         $result | Should -Match 'o\.Depth = src\.Depth'
         $result | Should -Match 'o\.FoundIteration = src\.Iteration'
         $result | Should -Match 'o\.\[Source\] = src\.\[Source\]'
         $result | Should -Match 'o\.\[Fk\] = src\.\[Fk\]'
-        $result | Should -Match 'src\.BatchRowNumber > ISNULL\(o\.ProcessedIteration, 0\)'
-        $result | Should -Match 'src\.BatchRowNumber <= o\.Processed'
+        $result | Should -Match 'src\.BatchRowNumber > ISNULL\(src\.ProcessedIteration, 0\)'
+        $result | Should -Match 'src\.BatchRowNumber <= src\.Processed'
     }
 
     It 'Includes INSERT INTO statement' {
@@ -423,7 +433,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -MaxBatchSize -1 `
             -FullSearch $false
 
-        $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target'
+        $result | Should -Match 'INSERT INTO \[SqlSizer\]\.\[Proc_Target\]'
     }
 
     It 'Includes operations table update' {
@@ -536,6 +546,30 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
         $result | Should -Match '-- Traverse INCOMING FK'
     }
 
+    It 'Orders constrained TOP results by target key for deterministic selection' {
+        Mock Get-TopClause { return "TOP (2)" }
+
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::Include) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{ Top = 2 } `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize -1 `
+            -FullSearch $false
+
+        $result | Should -Match 'SELECT DISTINCT TOP \(2\)'
+        $result | Should -Match 'ORDER BY Key0 ASC'
+    }
+
     Context 'Dynamic Key Column Generation' {
         It 'Generates single key column for single PK' {
             $result = New-CTETraversalQuery `
@@ -603,7 +637,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -FullSearch $false
 
             # INSERT should only list Key0 (since FK has 1 column)
-            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, \[State\], Source, Depth, Fk, Iteration\)'
+            $result | Should -Match 'INSERT INTO \[SqlSizer\]\.\[Proc_Target\] \(Key0, \[State\], Source, Depth, Fk, Iteration\)'
         }
 
         It 'Generates correct INSERT column list for composite key' {
@@ -626,7 +660,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
 
             # For outgoing: target columns = FK columns (2 columns)
             # INSERT should list Key0, Key1
-            $result | Should -Match 'INSERT INTO SqlSizer\.Proc_Target \(Key0, Key1, \[State\], Source, Depth, Fk, Iteration\)'
+            $result | Should -Match 'INSERT INTO \[SqlSizer\]\.\[Proc_Target\] \(Key0, Key1, \[State\], Source, Depth, Fk, Iteration\)'
         }
 
         It 'Does not include hardcoded 8-column key list' {

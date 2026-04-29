@@ -948,6 +948,46 @@ Describe 'TraversalConfiguration' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
         }
     }
+
+    Context 'Source and FK Filters' {
+        It 'Should skip traversal when SourceFilter does not match current source table' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Contacts'
+            $null = $rule.SetSourceFilter('dbo', 'Suppliers')
+            $config = New-TraversalConfig -Rules @($rule)
+
+            $query = New-TestQuery -Schema 'dbo' -Table 'Customers' -KeyColumns @('CustomerId') -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -TraversalConfiguration $config
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Contacts'
+        }
+
+        It 'Should skip traversal when ForeignKeyFilter does not match current FK' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Contacts'
+            $null = $rule.SetForeignKeyFilter('FK_Suppliers_Contact')
+            $config = New-TraversalConfig -Rules @($rule)
+
+            $query = New-TestQuery -Schema 'dbo' -Table 'Customers' -KeyColumns @('CustomerId') -Top 1
+
+            $testResult = Invoke-FindSubsetTest `
+                -Database $script:TestDatabase `
+                -ConnectionInfo $script:Connection `
+                -DatabaseInfo $script:DbInfo `
+                -Queries @($query) `
+                -TraversalConfiguration $config
+
+            $testResult.Success | Should -Be $true
+            Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
+            Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Contacts'
+        }
+    }
     
     Context 'StateOverride' {
         It 'Should exclude table when StateOverride=Exclude' {

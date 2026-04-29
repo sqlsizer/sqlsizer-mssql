@@ -158,6 +158,16 @@ function Find-Subset
                     continue
                 }
 
+                $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
+                if (-not (Test-TraversalConstraintsMatch `
+                    -Constraints $constraints `
+                    -SourceSchemaName $Table.SchemaName `
+                    -SourceTableName $Table.TableName `
+                    -ForeignKeyName $fk.Name))
+                {
+                    continue
+                }
+
                 $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration -FullSearch $FullSearch
                 
                 # Skip traversal when StateOverride is Exclude
@@ -165,8 +175,6 @@ function Find-Subset
                 {
                     continue
                 }
-                
-                $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
 
                 # O(1) lookup using hashtable instead of Where-Object
                 $targetTableInfo = $tablesByFullName["$targetSchema, $targetTable"]
@@ -308,20 +316,7 @@ function Find-Subset
         {
             $signature = $structure.Tables[$table]
             $processing = $structure.GetProcessingName($signature, $SessionId)
-            $pendingState = [int][TraversalState]::Pending
-            $excludeState = [int][TraversalState]::Exclude
-
-            $query = @"
--- Mark remaining Pending as Exclude for $($table.SchemaName).$($table.TableName)
-DECLARE @ExcludedCount INT = 0;
-UPDATE $processing
-SET [State] = $excludeState
-WHERE [State] = $pendingState;
-SET @ExcludedCount = @@ROWCOUNT;
-SELECT @ExcludedCount AS ExcludedCount;
-"@
-
-            $query += "`nGO`n"
+            $query = New-ExcludePendingQuery -ProcessingTable $processing -TableInfo $table
 
             $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
             if ($null -ne $result -and $null -ne $result.ExcludedCount)
@@ -337,51 +332,14 @@ SELECT @ExcludedCount AS ExcludedCount;
     {
         <#
         .SYNOPSIS
-            Gets the next operation to process (BFS or DFS).
+            Gets the next operation to process (BFS or legacy size-first ordering).
         #>
         param
         (
             [bool]$UseDfs
         )
 
-        if ($UseDfs)
-        {
-            # DFS: Process by count (deepest/most records first)
-            $query = @"
-SELECT TOP 1
-    o.[Table] AS TableId,
-    t.[Schema] AS TableSchema,
-    t.TableName,
-    o.[State] AS State,
-    o.Depth,
-    SUM(o.ToProcess - o.Processed) AS RemainingRecords
-FROM SqlSizer.Operations o
-INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
-WHERE o.Status IS NULL 
-    AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
-ORDER BY RemainingRecords DESC
-"@
-        }
-        else
-        {
-            # BFS: Process by depth (breadth-first)
-            $query = @"
-SELECT TOP 1
-    o.[Table] AS TableId,
-    t.[Schema] AS TableSchema,
-    t.TableName,
-    o.[State] AS State,
-    o.Depth,
-    SUM(o.ToProcess - o.Processed) AS RemainingRecords
-FROM SqlSizer.Operations o
-INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
-WHERE o.Status IS NULL 
-    AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
-ORDER BY o.Depth ASC, RemainingRecords DESC
-"@
-        }
+        $query = New-GetNextOperationQuery -SessionId $SessionId -UseDfs $UseDfs
 
         $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
 
@@ -414,68 +372,12 @@ ORDER BY o.Depth ASC, RemainingRecords DESC
         )
 
         $state = [int]$Operation.State
-
-        if ($MaxBatchSize -eq -1)
-        {
-            # Process all at once
-            $query = @"
-UPDATE SqlSizer.Operations
-SET Status = 0, ProcessedIteration = Processed, Processed = ToProcess
-WHERE [Table] = $($Operation.TableId)
-    AND [State] = $state
-    AND Depth = $($Operation.Depth)
-    AND Status IS NULL
-    AND SessionId = '$SessionId'
-"@
-        }
-        else
-        {
-            # Process in batches - must separate SELECT and UPDATE since SQL Server
-            # doesn't allow mixing column updates with variable assignment in SET clause
-            $query = @"
-DECLARE @Remaining INT = $MaxBatchSize;
-DECLARE @ProcessThisRow INT;
-DECLARE @OperationId INT;
-
-WHILE @Remaining > 0
-BEGIN
-    SET @OperationId = NULL;
-    SET @ProcessThisRow = NULL;
-
-    -- Calculate how much to process from the next available row
-    SELECT TOP 1
-        @OperationId = Id,
-        @ProcessThisRow =
-        CASE WHEN (ToProcess - Processed) <= @Remaining 
-             THEN (ToProcess - Processed) 
-             ELSE @Remaining 
-        END
-    FROM SqlSizer.Operations
-    WHERE [Table] = $($Operation.TableId)
-        AND [State] = $state
-        AND Depth = $($Operation.Depth)
-        AND Status IS NULL
-        AND SessionId = '$SessionId'
-        AND (ToProcess - Processed) > 0
-    ORDER BY Id;
-    
-    IF @OperationId IS NULL OR @ProcessThisRow IS NULL OR @ProcessThisRow = 0
-        BREAK;
-    
-    -- Update exactly the selected row
-    UPDATE SqlSizer.Operations
-    SET Status = 0,
-        ProcessedIteration = Processed,
-        Processed = Processed + @ProcessThisRow
-    WHERE Id = @OperationId;
-    
-    IF @@ROWCOUNT = 0
-        BREAK;
-    
-    SET @Remaining = @Remaining - @ProcessThisRow;
-END
-"@
-        }
+        $query = New-MarkOperationInProgressQuery `
+            -TableId $Operation.TableId `
+            -State $state `
+            -Depth $Operation.Depth `
+            -SessionId $SessionId `
+            -MaxBatchSize $MaxBatchSize
 
         $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
     }
@@ -491,23 +393,7 @@ END
             [int]$Iteration
         )
 
-        $query = @"
--- Reset operations that hit batch limit
-UPDATE SqlSizer.Operations
-SET Status = NULL,
-    ProcessedIteration = NULL
-WHERE Status = 0 
-    AND ToProcess <> Processed
-    AND SessionId = '$SessionId';
-
--- Mark fully processed operations as complete
-UPDATE SqlSizer.Operations
-SET Status = 1, 
-    ProcessedIteration = $Iteration,
-    ProcessedDate = GETDATE()
-WHERE Status = 0
-    AND SessionId = '$SessionId';
-"@
+        $query = New-CompleteOperationsQuery -SessionId $SessionId -Iteration $Iteration
 
         $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
     }
@@ -524,16 +410,7 @@ WHERE Status = 0
             [DateTime]$StartTime
         )
 
-        $query = @"
-SELECT 
-    COUNT(*) AS TotalOperations,
-    SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) AS CompletedOperations,
-    SUM(Processed) AS TotalRecordsProcessed,
-    SUM(ToProcess - Processed) AS TotalRecordsRemaining,
-    MAX(Depth) AS MaxDepthReached
-FROM SqlSizer.Operations
-WHERE SessionId = '$SessionId'
-"@
+        $query = New-GetIterationStatisticsQuery -SessionId $SessionId
 
         $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
 

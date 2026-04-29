@@ -87,6 +87,12 @@ function Install-SqlSizerCore
     $tmp = "CREATE NONCLUSTERED INDEX [Index] ON SqlSizer.Operations ([Table] ASC, [State] ASC, [Source] ASC, [Depth] ASC)"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
+    $tmp = "CREATE NONCLUSTERED INDEX [IX_Operations_SessionStatusDepth] ON SqlSizer.Operations ([SessionId] ASC, [Status] ASC, [Depth] ASC) INCLUDE ([Table], [State], [ToProcess], [Processed])"
+    $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
+    $tmp = "CREATE NONCLUSTERED INDEX [IX_Operations_ActiveBatch] ON SqlSizer.Operations ([SessionId] ASC, [Status] ASC, [Table] ASC, [State] ASC, [Depth] ASC, [FoundIteration] ASC, [Source] ASC, [Fk] ASC) INCLUDE ([ToProcess], [Processed], [ProcessedIteration])"
+    $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
     $schemaExists = Test-SchemaExists -Database $Database -SchemaName "SqlSizerHistory" -ConnectionInfo $ConnectionInfo
 
     if ($schemaExists -eq $false)

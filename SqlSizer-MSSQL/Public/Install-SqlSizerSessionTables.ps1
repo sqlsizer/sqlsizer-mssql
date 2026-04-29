@@ -34,6 +34,7 @@ function Install-SqlSizerSessionTables
         $keys = ""
         $columns = ""
         $keysIndex = ""
+        $keysInclude = ""
         $i = 0
         $len = $structure.Signatures[$signature].Count
 
@@ -42,6 +43,7 @@ function Install-SqlSizerSessionTables
             $keys += " Key$($i) "
             $columns += " Key$($i) "
             $keysIndex += " Key$($i) ASC "
+            $keysInclude += " Key$($i) "
 
             if ($column.DataType -in @('varchar', 'nvarchar', 'char', 'nchar'))
             {
@@ -57,6 +59,7 @@ function Install-SqlSizerSessionTables
                 $keysIndex += ", "
                 $keys += ", "
                 $columns += ", "
+                $keysInclude += ", "
             }
 
             $i += 1
@@ -84,6 +87,10 @@ function Install-SqlSizerSessionTables
     
                 $sql = "CREATE NONCLUSTERED INDEX [Index_2] ON $($processing) ([Iteration]) INCLUDE ([Depth], [Fk])"
     
+                $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
+                $sql = "CREATE NONCLUSTERED INDEX [IX_BatchSource] ON $($processing) ([State] ASC, [Depth] ASC, [Iteration] ASC, [Source] ASC, [Fk] ASC, [Id] ASC) INCLUDE ($keysInclude)"
+
                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
             }
 

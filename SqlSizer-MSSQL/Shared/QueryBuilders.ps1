@@ -7,6 +7,46 @@
     used in graph traversal operations. Separated for testability.
 #>
 
+function ConvertTo-SqlIdentifier
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return '[' + $Name.Replace(']', ']]') + ']'
+}
+
+function ConvertTo-SqlMultipartIdentifier
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    return (($Name -split '\.') | ForEach-Object { ConvertTo-SqlIdentifier $_ }) -join '.'
+}
+
+function ConvertTo-SqlStringLiteral
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
 function New-CTETraversalQuery
 {
     <#
@@ -66,6 +106,12 @@ function New-CTETraversalQuery
         [bool]$FullSearch
     )
 
+    $sourceProcessingSql = ConvertTo-SqlMultipartIdentifier $SourceProcessing
+    $targetProcessingSql = ConvertTo-SqlMultipartIdentifier $TargetProcessing
+    $sourceTableSql = (ConvertTo-SqlIdentifier $SourceTable.SchemaName) + "." + (ConvertTo-SqlIdentifier $SourceTable.TableName)
+    $targetTableSql = (ConvertTo-SqlIdentifier $TargetTable.SchemaName) + "." + (ConvertTo-SqlIdentifier $TargetTable.TableName)
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
     # Build column mappings based on direction
     if ($Direction -eq [TraversalDirection]::Outgoing)
     {
@@ -76,18 +122,18 @@ function New-CTETraversalQuery
         # SourceRecords (src) -> SourceTable (srcTable) on PK -> TargetTable (tgt) on FK->PK
         $srcTableJoinConditions = for ($i = 0; $i -lt $SourceTable.PrimaryKey.Count; $i++) {
             $col = $SourceTable.PrimaryKey[$i]
-            "src.Key$i = srcTable.$($col.Name)"
+            "src.Key$i = srcTable.$(ConvertTo-SqlIdentifier $col.Name)"
         }
         $srcTableJoinClause = $srcTableJoinConditions -join " AND "
         
         $targetJoinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
-            "srcTable.$($Fk.FkColumns[$i].Name) = tgt.$($Fk.Columns[$i].Name)"
+            "srcTable.$(ConvertTo-SqlIdentifier $Fk.FkColumns[$i].Name) = tgt.$(ConvertTo-SqlIdentifier $Fk.Columns[$i].Name)"
         }
         $targetJoinClause = $targetJoinConditions -join " AND "
         
         $fromClause = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
+FROM $targetTableSql tgt
+    INNER JOIN $sourceTableSql srcTable ON $targetJoinClause
     INNER JOIN SourceRecords src ON $srcTableJoinClause
 "@
         
@@ -100,12 +146,12 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
         # For INCOMING: direct join from SourceRecords to TargetTable
         # SourceRecords has PK of FK target, join to TargetTable (FK source) on FK columns
         $joinConditions = for ($i = 0; $i -lt $Fk.FkColumns.Count; $i++) {
-            "src.Key$i = tgt.$($Fk.FkColumns[$i].Name)"
+            "src.Key$i = tgt.$(ConvertTo-SqlIdentifier $Fk.FkColumns[$i].Name)"
         }
         $joinClause = $joinConditions -join " AND "
         
         $fromClause = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+FROM $targetTableSql tgt
     INNER JOIN SourceRecords src ON $joinClause
 "@
         
@@ -149,34 +195,41 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     # TOP is reserved for table-specific traversal constraints to avoid dropping
     # dependent rows found from the selected source batch.
     $topClause = Get-TopClause -MaxBatchSize -1 -Constraints $Constraints
+    $orderByClause = if ($topClause -ne "") {
+        "ORDER BY " + ((0..($targetColumns.Count - 1) | ForEach-Object { "Key$_ ASC" }) -join ", ")
+    } else {
+        ""
+    }
 
     $sourceBatchJoinConditions = @(
         "o.[Table] = $SourceTableId",
-        "o.[State] = {0}.[State]",
-        "o.Depth = {0}.Depth",
-        "o.FoundIteration = {0}.Iteration",
-        "((o.[Source] = {0}.[Source]) OR (o.[Source] IS NULL AND {0}.[Source] IS NULL))",
-        "((o.[Fk] = {0}.[Fk]) OR (o.[Fk] IS NULL AND {0}.[Fk] IS NULL))",
+        "o.[State] = src.[State]",
+        "o.Depth = src.Depth",
+        "o.FoundIteration = src.Iteration",
+        "((o.[Source] = src.[Source]) OR (o.[Source] IS NULL AND src.[Source] IS NULL))",
+        "((o.[Fk] = src.[Fk]) OR (o.[Fk] IS NULL AND src.[Fk] IS NULL))",
         "o.Status = 0",
-        "o.SessionId = '$SessionId'"
+        "o.SessionId = $sessionIdLiteral"
     )
-    $sourceBatchJoinClause = ($sourceBatchJoinConditions | ForEach-Object { $_ -f 'src' }) -join "`n        AND "
-    $sourceBatchJoinClauseForUpdate = ($sourceBatchJoinConditions | ForEach-Object { $_ -f 'srcRows' }) -join "`n        AND "
-    $sourceBatchWindowClause = "src.BatchRowNumber > ISNULL(o.ProcessedIteration, 0)`n        AND src.BatchRowNumber <= o.Processed"
-    $sourceBatchWindowClauseForUpdate = "srcRows.BatchRowNumber > ISNULL(o.ProcessedIteration, 0)`n        AND srcRows.BatchRowNumber <= o.Processed"
+    $sourceBatchJoinClause = $sourceBatchJoinConditions -join "`n        AND "
+    $sourceBatchWindowClause = "src.BatchRowNumber > ISNULL(src.ProcessedIteration, 0)`n        AND src.BatchRowNumber <= src.Processed"
+    $sourceBatchWindowClauseForUpdate = "srcRows.BatchRowNumber > ISNULL(srcRows.ProcessedIteration, 0)`n        AND srcRows.BatchRowNumber <= srcRows.Processed"
 
     $sourceRecordsForUpdate = @"
 (
     SELECT $sourceKeyListFromSrcRows, srcRows.Depth, srcRows.Fk
     FROM (
-        SELECT $sourceKeyList, Depth, [Source], Fk, [State], Iteration,
+        SELECT $sourceKeyListFromSrc, src.Depth, src.Fk,
+            o.Id AS OperationId,
+            o.ProcessedIteration,
+            o.Processed,
             ROW_NUMBER() OVER (
-                PARTITION BY [State], Depth, Iteration, [Source], Fk
-                ORDER BY Id
+                PARTITION BY o.Id
+                ORDER BY src.Id
             ) AS BatchRowNumber
-        FROM $SourceProcessing src
+        FROM $sourceProcessingSql src
+        INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClause
     ) srcRows
-    INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClauseForUpdate
     WHERE $sourceBatchWindowClauseForUpdate
 ) src
 "@
@@ -184,8 +237,8 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     if ($Direction -eq [TraversalDirection]::Outgoing)
     {
         $fromClauseForUpdate = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
+FROM $targetTableSql tgt
+    INNER JOIN $sourceTableSql srcTable ON $targetJoinClause
     INNER JOIN $sourceRecordsForUpdate ON $srcTableJoinClause
 WHERE 1 = 1
 "@
@@ -193,7 +246,7 @@ WHERE 1 = 1
     else
     {
         $fromClauseForUpdate = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+FROM $targetTableSql tgt
     INNER JOIN $sourceRecordsForUpdate ON $joinClause
 WHERE 1 = 1
 "@
@@ -213,17 +266,20 @@ WHERE 1 = 1
 DECLARE @InsertedRows TABLE (Depth INT);
 
 WITH SourceRecordCandidates AS (
-    SELECT $sourceKeyList, Depth, [Source], Fk, [State], Iteration,
+    SELECT $sourceKeyListFromSrc, src.Depth, src.Fk,
+        o.Id AS OperationId,
+        o.ProcessedIteration,
+        o.Processed,
         ROW_NUMBER() OVER (
-            PARTITION BY [State], Depth, Iteration, [Source], Fk
-            ORDER BY Id
+            PARTITION BY o.Id
+            ORDER BY src.Id
         ) AS BatchRowNumber
-    FROM $SourceProcessing src
+    FROM $sourceProcessingSql src
+    INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClause
 ),
 SourceRecords AS (
     SELECT $sourceKeyListFromSrc, src.Depth, src.Fk
     FROM SourceRecordCandidates src
-    INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClause
     WHERE $sourceBatchWindowClause
 ),
 NewRecords AS (
@@ -231,15 +287,16 @@ NewRecords AS (
         $targetKeyList,
         src.Depth + 1 AS Depth
     $fromClause
-    WHERE tgt.$($targetColumns[0].Name) IS NOT NULL
+    WHERE tgt.$(ConvertTo-SqlIdentifier $targetColumns[0].Name) IS NOT NULL
         $whereClause
         AND NOT EXISTS (
             SELECT 1 
-            FROM $TargetProcessing existing 
+            FROM $targetProcessingSql existing
             WHERE $notExistsClause
         )
+    $orderByClause
 )
-INSERT INTO $TargetProcessing ($targetKeyListForInsert, [State], Source, Depth, Fk, Iteration)
+INSERT INTO $targetProcessingSql ($targetKeyListForInsert, [State], Source, Depth, Fk, Iteration)
 OUTPUT inserted.Depth INTO @InsertedRows
 SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
@@ -255,13 +312,13 @@ SET [State] = $([int][TraversalState]::Include),
     Depth = nr.Depth,
     Iteration = $Iteration
 OUTPUT inserted.Depth INTO @InsertedRows
-FROM $TargetProcessing existing
+FROM $targetProcessingSql existing
 INNER JOIN (
     SELECT DISTINCT
         $targetKeyList,
         src.Depth + 1 AS Depth
     $fromClauseForUpdate
-        AND tgt.$($targetColumns[0].Name) IS NOT NULL
+        AND tgt.$(ConvertTo-SqlIdentifier $targetColumns[0].Name) IS NOT NULL
         $whereClause
 ) nr ON $updateKeyClause
 WHERE existing.[State] = $([int][TraversalState]::Pending);
@@ -284,7 +341,7 @@ SELECT
     Depth, 
     GETDATE(), 
     NULL, 
-    '$SessionId', 
+    $sessionIdLiteral,
     $Iteration, 
     NULL
 FROM @InsertedRows
@@ -314,17 +371,21 @@ function New-ExcludePendingQuery
         [string]$ProcessingTable,
         
         [Parameter(Mandatory = $true)]
-        [TableInfo]$TableInfo
+        [object]$TableInfo
     )
 
     $pendingState = [int][TraversalState]::Pending
     $excludeState = [int][TraversalState]::Exclude
+    $processingTableSql = ConvertTo-SqlMultipartIdentifier $ProcessingTable
 
     $query = @"
 -- Mark remaining Pending as Exclude for $($TableInfo.SchemaName).$($TableInfo.TableName)
-UPDATE $ProcessingTable
+DECLARE @ExcludedCount INT = 0;
+UPDATE $processingTableSql
 SET [State] = $excludeState
 WHERE [State] = $pendingState;
+SET @ExcludedCount = @@ROWCOUNT;
+SELECT @ExcludedCount AS ExcludedCount;
 
 GO
 
@@ -352,13 +413,15 @@ function New-GetNextOperationQuery
         [bool]$UseDfs
     )
 
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
     if ($UseDfs)
     {
-        # DFS: Process by count (deepest/most records first)
+        # Preserve legacy UseDfs behavior: process the largest remaining operation first.
         return @"
 SELECT TOP 1
     o.[Table] AS TableId,
-    t.SchemaName AS TableSchema,
+    t.[Schema] AS TableSchema,
     t.TableName,
     o.[State] AS State,
     o.Depth,
@@ -366,8 +429,8 @@ SELECT TOP 1
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
-    AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.SchemaName, t.TableName, o.[State], o.Depth
+    AND o.SessionId = $sessionIdLiteral
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
 ORDER BY RemainingRecords DESC
 "@
     }
@@ -377,7 +440,7 @@ ORDER BY RemainingRecords DESC
         return @"
 SELECT TOP 1
     o.[Table] AS TableId,
-    t.SchemaName AS TableSchema,
+    t.[Schema] AS TableSchema,
     t.TableName,
     o.[State] AS State,
     o.Depth,
@@ -385,8 +448,8 @@ SELECT TOP 1
 FROM SqlSizer.Operations o
 INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
 WHERE o.Status IS NULL 
-    AND o.SessionId = '$SessionId'
-GROUP BY o.[Table], t.SchemaName, t.TableName, o.[State], o.Depth
+    AND o.SessionId = $sessionIdLiteral
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
 ORDER BY o.Depth ASC, RemainingRecords DESC
 "@
     }
@@ -421,6 +484,8 @@ function New-MarkOperationInProgressQuery
         [int]$MaxBatchSize
     )
 
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
     if ($MaxBatchSize -eq -1)
     {
         # Process all at once
@@ -431,7 +496,7 @@ WHERE [Table] = $TableId
     AND [State] = $State
     AND Depth = $Depth
     AND Status IS NULL
-    AND SessionId = '$SessionId'
+    AND SessionId = $sessionIdLiteral
 "@
     }
     else
@@ -461,7 +526,7 @@ BEGIN
         AND [State] = $State
         AND Depth = $Depth
         AND Status IS NULL
-        AND SessionId = '$SessionId'
+        AND SessionId = $sessionIdLiteral
         AND (ToProcess - Processed) > 0
     ORDER BY Id;
     
@@ -504,6 +569,8 @@ function New-CompleteOperationsQuery
         [int]$Iteration
     )
 
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
     return @"
 -- Reset operations that hit batch limit
 UPDATE SqlSizer.Operations
@@ -511,7 +578,7 @@ SET Status = NULL,
     ProcessedIteration = NULL
 WHERE Status = 0 
     AND ToProcess <> Processed
-    AND SessionId = '$SessionId';
+    AND SessionId = $sessionIdLiteral;
 
 -- Mark fully processed operations as complete
 UPDATE SqlSizer.Operations
@@ -519,7 +586,7 @@ SET Status = 1,
     ProcessedIteration = $Iteration,
     ProcessedDate = GETDATE()
 WHERE Status = 0
-    AND SessionId = '$SessionId';
+    AND SessionId = $sessionIdLiteral;
 "@
 }
 
@@ -539,6 +606,8 @@ function New-GetIterationStatisticsQuery
         [string]$SessionId
     )
 
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
     return @"
 SELECT 
     COUNT(*) AS TotalOperations,
@@ -547,7 +616,7 @@ SELECT
     SUM(ToProcess - Processed) AS TotalRecordsRemaining,
     MAX(Depth) AS MaxDepthReached
 FROM SqlSizer.Operations
-WHERE SessionId = '$SessionId'
+WHERE SessionId = $sessionIdLiteral
 "@
 }
 

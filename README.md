@@ -15,7 +15,7 @@ A PowerShell module for extracting referentially-consistent data subsets from SQ
 | **No size limits** | Works with any database or subset size |
 | **Composite key support** | Handles any PK/FK column count and data types |
 | **Server-side processing** | All heavy lifting in SQL Server - minimal PowerShell memory |
-| **Graph traversal** | BFS or DFS with set-based deduplication for cycle safety |
+| **Graph traversal** | BFS or legacy size-first ordering with set-based deduplication for cycle safety |
 | **CTE-based SQL** | Optimized, readable query generation |
 | **Checkpoint/resume** | Save progress and recover from crashes on long operations |
 | **Traversal configuration** | Per-table state overrides, depth limits, row caps, ignored tables |

@@ -144,10 +144,10 @@ function Get-TraversalConstraints
 {
     <#
     .SYNOPSIS
-        Gets traversal constraints (MaxDepth, Top) from TraversalConfiguration.
+        Gets traversal constraints from TraversalConfiguration.
     .DESCRIPTION
         Pure function that retrieves constraints for FK traversal.
-        Returns a hashtable with MaxDepth and Top properties.
+        Returns a hashtable with MaxDepth, Top, source filter, and FK filter properties.
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -164,8 +164,11 @@ function Get-TraversalConstraints
     )
 
     $result = @{
-        MaxDepth = $null
-        Top      = $null
+        MaxDepth         = $null
+        Top              = $null
+        SourceSchemaName = $null
+        SourceTableName  = $null
+        ForeignKeyName   = $null
     }
 
     if ($null -ne $TraversalConfiguration)
@@ -186,10 +189,71 @@ function Get-TraversalConstraints
             {
                 $result.Top = $item.Constraints.Top
             }
+            if ($item.Constraints.SourceSchemaName -ne "")
+            {
+                $result.SourceSchemaName = $item.Constraints.SourceSchemaName
+            }
+            if ($item.Constraints.SourceTableName -ne "")
+            {
+                $result.SourceTableName = $item.Constraints.SourceTableName
+            }
+            if ($item.Constraints.ForeignKeyName -ne "")
+            {
+                $result.ForeignKeyName = $item.Constraints.ForeignKeyName
+            }
         }
     }
 
     return $result
+}
+
+function Test-TraversalConstraintsMatch
+{
+    <#
+    .SYNOPSIS
+        Determines whether a relationship satisfies source and FK filters.
+    .DESCRIPTION
+        Source table and FK-name constraints are applied before SQL generation
+        so skipped relationships do not produce empty traversal batches.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [hashtable]$Constraints,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceSchemaName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceTableName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ForeignKeyName
+    )
+
+    if ($null -eq $Constraints)
+    {
+        return $true
+    }
+
+    if (($null -ne $Constraints.SourceSchemaName) -and ($Constraints.SourceSchemaName -ne "") -and ($Constraints.SourceSchemaName -ne $SourceSchemaName))
+    {
+        return $false
+    }
+
+    if (($null -ne $Constraints.SourceTableName) -and ($Constraints.SourceTableName -ne "") -and ($Constraints.SourceTableName -ne $SourceTableName))
+    {
+        return $false
+    }
+
+    if (($null -ne $Constraints.ForeignKeyName) -and ($Constraints.ForeignKeyName -ne "") -and ($Constraints.ForeignKeyName -ne $ForeignKeyName))
+    {
+        return $false
+    }
+
+    return $true
 }
 
 function Test-ShouldTraverseDirection
@@ -497,6 +561,7 @@ function Get-IncludedTraversalStateSqlList
 Export-ModuleMember -Function @(
     'Get-NewTraversalState',
     'Get-TraversalConstraints',
+    'Test-TraversalConstraintsMatch',
     'Test-ShouldTraverseDirection',
     'Get-TopClause',
     'Get-ForeignKeyRelationships',
