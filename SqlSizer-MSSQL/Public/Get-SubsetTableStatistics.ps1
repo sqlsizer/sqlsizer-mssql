@@ -22,23 +22,41 @@ function Get-SubsetTableStatistics
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    $sql = "SELECT t.[Schema] as [SchemaName],
-                   t.TableName,
-                   SUM([ToProcess]) as [Count]
-            FROM [SqlSizer].[Operations] o
-            INNER JOIN [SqlSizer].[Tables] t ON o.[Table] = t.Id
-            WHERE (o.FoundIteration = $Iteration OR $Iteration = -1) AND o.FoundIteration >= $StartIteration AND o.ToProcess <> 0 AND o.SessionId = '$SessionId'
-            GROUP BY t.[Schema], t.TableName
-            ORDER BY [Schema], [TableName]"
-
-    $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
-
     $result = [System.Collections.Generic.List[SubsettingTableResult]]@()
-    foreach ($row in $rows)
-    {
-        $tableInfo = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $row.SchemaName) -and ($_.TableName -eq $row.TableName) }
+    $structure = [Structure]::new($DatabaseInfo)
+    $includedStates = Get-IncludedTraversalStateSqlList
 
-        if ($null -eq $tableInfo)
+    foreach ($tableInfo in $DatabaseInfo.Tables)
+    {
+        if (($tableInfo.PrimaryKey.Count -eq 0) -or ($tableInfo.SchemaName.StartsWith('SqlSizer')))
+        {
+            continue
+        }
+
+        $signature = $structure.Tables[$tableInfo]
+        if (($null -eq $signature) -or ($signature -eq ""))
+        {
+            continue
+        }
+
+        $processing = $structure.GetProcessingName($signature, $SessionId)
+        $keys = @()
+        for ($i = 0; $i -lt $tableInfo.PrimaryKey.Count; $i++)
+        {
+            $keys += "Key$i"
+        }
+
+        $sql = "SELECT COUNT(*) AS [Count]
+                FROM (
+                    SELECT DISTINCT $([string]::Join(', ', $keys))
+                    FROM $processing
+                    WHERE ([Iteration] = $Iteration OR $Iteration = -1)
+                        AND [Iteration] >= $StartIteration
+                        AND [State] IN ($includedStates)
+                ) subsetRows"
+
+        $row = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
+        if ($null -eq $row)
         {
             continue
         }
@@ -52,5 +70,5 @@ function Get-SubsetTableStatistics
         $null = $result.Add($obj)
     }
 
-    return $result
+    return $result | Sort-Object SchemaName, TableName
 }

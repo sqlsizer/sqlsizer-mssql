@@ -1267,12 +1267,11 @@ Describe 'Multiple Starting Queries' {
 }
 
 # =====================================================
-# Pending State Resolution Tests
-# Tests for the fix that moved Resolve-PendingStates
-# from inside each iteration to after traversal completes.
+# Output Closure State Tests
+# Tests that bookkeeping states are resolved or filtered after traversal completes.
 # =====================================================
 
-Describe 'Pending State Resolution' {
+Describe 'Output Closure State Filtering' {
     AfterEach {
         if ($testResult -and $testResult.SessionId) {
             Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
@@ -1283,11 +1282,11 @@ Describe 'Pending State Resolution' {
         }
     }
 
-    Context 'Pending states resolved after full traversal' {
-        It 'Should correctly exclude Pending rows not reachable via Include path' {
+    Context 'Bookkeeping states resolved after full traversal' {
+        It 'Should exclude incoming rows not reachable through the minimal dependency closure' {
             # Start with a Category (Include state, FullSearch=false)
-            # Incoming FKs (SubCategories -> Categories) create Pending states
-            # After traversal, those Pending states should be resolved to Exclude
+            # Incoming FKs (SubCategories -> Categories) are not part of minimal subset mode.
+            # If candidate/Pending rows exist from compatibility paths, output surfaces filter them out.
             $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
                 -Where "[`$table].ParentCategoryId IS NULL" -Top 1
 
@@ -1300,15 +1299,15 @@ Describe 'Pending State Resolution' {
 
             $testResult.Success | Should -Be $true
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Categories' -MinRows 1
-            # SubCategories should be excluded (incoming FK, FullSearch=false, Pending -> Exclude)
+            # SubCategories should be excluded (incoming FK, FullSearch=false)
             Assert-SubsetExcludes -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'SubCategories'
         }
 
-        It 'Should promote Pending to Include when reachable via Include path' {
+        It 'Should include rows reachable through outgoing dependency paths' {
             # Start with OrderDetail (Include) - it references both Order and ProductVariant
             # Order is reachable via outgoing FK from OrderDetail (Include path)
             # Customer is reachable from Order via outgoing FK (Include path)
-            # All should be Include, not left as Pending
+            # All should be in the final output closure.
             $query = New-TestQuery -Schema 'dbo' -Table 'OrderDetails' -KeyColumns @('OrderId', 'LineNum') -Top 1
 
             $testResult = Invoke-FindSubsetTest `
@@ -1324,10 +1323,9 @@ Describe 'Pending State Resolution' {
             Assert-SubsetContains -SubsetSummary $testResult.Summary -Schema 'dbo' -Table 'Customers' -MinRows 1
         }
 
-        It 'Should handle multi-path convergence without premature Pending resolution' {
+        It 'Should handle multi-path convergence without duplicate output rows' {
             # Start from two different tables that both lead to the same dependency
-            # The fix ensures Pending resolution happens AFTER all paths are explored,
-            # so a record initially marked Pending from one path can be promoted to Include from another
+            # The closure should keep shared dependencies once, regardless of how many paths reach them.
             $queryProduct = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
             $queryOrder = New-TestQuery -Schema 'dbo' -Table 'Orders' -KeyColumns @('OrderId') -Top 1
 
@@ -1349,14 +1347,14 @@ Describe 'Pending State Resolution' {
         }
     }
 
-    Context 'Interactive mode Pending resolution' {
-        It 'Should resolve Pending states only when traversal is complete in interactive mode' {
+    Context 'Interactive mode state cleanup' {
+        It 'Should clean up bookkeeping states only when traversal is complete in interactive mode' {
             $sessionId = New-TestSession `
                 -Database $script:TestDatabase `
                 -ConnectionInfo $script:Connection `
                 -DatabaseInfo $script:DbInfo
 
-            # Use IncludeFull to trigger incoming FK traversal (creates Pending states)
+            # Use IncludeFull to trigger incoming FK traversal.
             $query = New-TestQuery -Schema 'dbo' -Table 'Categories' -KeyColumns @('CategoryId') `
                 -State ([TraversalState]::IncludeFull) `
                 -Where "[`$table].ParentCategoryId IS NULL" -Top 1

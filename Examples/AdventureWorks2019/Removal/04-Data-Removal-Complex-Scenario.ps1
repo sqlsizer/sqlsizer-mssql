@@ -18,7 +18,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Define start set
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
+$query.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -32,8 +32,8 @@ $ignored.TableName = "ErrorLog"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find removal subset - Blue = InboundOnly (find rows that must be removed first)
-# Use the refactored algorithm (cleaner, more efficient, CTE-based queries)
+# Find removal subset with the InboundOnly policy (find rows that must be removed first)
+# Use the removal closure engine (incoming FK traversal)
 Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Test foreign keys
@@ -57,4 +57,3 @@ Test-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $
 $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 
 Uninstall-SqlSizer -Database $database -ConnectionInfo $connection -DatabaseInfo $info
-

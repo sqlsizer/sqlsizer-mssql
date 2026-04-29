@@ -29,7 +29,8 @@ function Remove-FoundSubsetFromDatabase
 
         $table = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $TableInfo.SchemaName) -and ($_.TableName -eq $TableInfo.TableName) }
         $primaryKey = $table.PrimaryKey
-        $where = " WHERE EXISTS(SELECT * FROM SqlSizer_$SessionId.$($TableInfo.SchemaName)_$($TableInfo.TableName) e WHERE "
+        $includedStates = Get-IncludedTraversalStateSqlList
+        $where = " WHERE EXISTS(SELECT * FROM SqlSizer_$SessionId.$($TableInfo.SchemaName)_$($TableInfo.TableName) e WHERE e.[State] IN ($includedStates) AND "
 
         $conditions = @()
         $i = 0
@@ -83,5 +84,4 @@ function Remove-FoundSubsetFromDatabase
 
     Write-Progress -Activity "Removing subset $SessionId" -Completed
 }
-
 

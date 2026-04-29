@@ -18,7 +18,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 # Define start set
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -29,7 +29,7 @@ $query.OrderBy = "[`$table].LastName ASC"
 # Init start set
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm (forward traversal)
+# Find subset using minimal dependency closure (outgoing FK traversal)
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId
 
 # Get subset info
@@ -66,4 +66,3 @@ foreach ($table in $infoNew.Tables)
 Write-Verbose "Logical reads: $($connection.Statistics.LogicalReads)"
 Write-Verbose "Total rows: $($sum)"
 Write-Verbose "==================="
-

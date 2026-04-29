@@ -20,14 +20,14 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Define start set
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
+$query.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
 $query.Where = "[`$table].FirstName = 'Michael'"
 
 $query2 = New-Object -TypeName SqlSizerQuery
-$query2.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
+$query2.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
 $query2.Schema = "Production"
 $query2.Table = "Product"
 $query2.KeyColumns = @('ProductID')
@@ -36,8 +36,8 @@ $query2.Where = "[`$table].SafetyStockLevel > 500"
 # Init start set with data from query and query2 (multiple sources)
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query, $query2) -DatabaseInfo $info -SessionId $sessionId
 
-# Find removal subset - Blue = InboundOnly (find rows that must be removed first)
-# Use the refactored algorithm (cleaner, more efficient, CTE-based queries)
+# Find removal subset with the InboundOnly policy (find rows that must be removed first)
+# Use the removal closure engine (incoming FK traversal)
 Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Test foreign keys
@@ -59,4 +59,3 @@ Test-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $
 
 Write-Host "Following data has been removed:"
 Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
-

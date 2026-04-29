@@ -552,12 +552,12 @@ Describe 'Get-AdditionalWhereConditions' {
         $result | Should -HaveCount 0
     }
 
-    It 'Includes cycle prevention when FullSearch is false' {
+    It 'Does not add FK-name cycle prevention when FullSearch is false' {
         $result = Get-AdditionalWhereConditions `
             -FkId 5 `
             -FullSearch $false
 
-        $result | Should -Match "src\.Fk <> 5"
+        $result | Should -HaveCount 0
     }
 
     It 'Includes MaxDepth constraint when provided' {
@@ -569,15 +569,14 @@ Describe 'Get-AdditionalWhereConditions' {
         $result | Should -Be "src.Depth < 3"
     }
 
-    It 'Includes both MaxDepth and cycle prevention' {
+    It 'Includes MaxDepth without FK-name cycle prevention' {
         $result = Get-AdditionalWhereConditions `
             -Constraints @{ MaxDepth = 3 } `
             -FkId 10 `
             -FullSearch $false
 
-        $result | Should -HaveCount 2
+        $result | Should -HaveCount 1
         $result[0] | Should -Be "src.Depth < 3"
-        $result[1] | Should -Match "src\.Fk <> 10"
     }
 
     It 'Ignores Top constraint (not used in WHERE clause)' {
@@ -588,6 +587,23 @@ Describe 'Get-AdditionalWhereConditions' {
 
         $result | Should -HaveCount 1
         $result[0] | Should -Not -Match "TOP"
+    }
+}
+
+Describe 'Get-IncludedTraversalStateValues' {
+    It 'Includes closure output states' {
+        $result = Get-IncludedTraversalStateValues
+
+        $result | Should -Contain ([int][TraversalState]::Include)
+        $result | Should -Contain ([int][TraversalState]::InboundOnly)
+        $result | Should -Contain ([int][TraversalState]::IncludeFull)
+    }
+
+    It 'Excludes bookkeeping states' {
+        $result = Get-IncludedTraversalStateValues
+
+        $result | Should -Not -Contain ([int][TraversalState]::Pending)
+        $result | Should -Not -Contain ([int][TraversalState]::Exclude)
     }
 }
 

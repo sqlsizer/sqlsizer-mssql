@@ -16,7 +16,7 @@ $info = Get-DatabaseInfo -Database $database -ConnectionInfo $connection
 # Phase 1
 $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connection -DatabaseInfo $info -ForceInstallation $true
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -27,7 +27,7 @@ $query.OrderBy = "[`$table].LastName ASC"
 $config = New-Object -Type TraversalConfiguration
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
-# Phase 1: Use Find-Subset for forward traversal (Pending state for forward traversal)
+# Phase 1: Use Find-Subset for the minimal dependency closure (outgoing FK traversal)
 $null = Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -UseDfs $false -SessionId $sessionId -TraversalConfiguration $config
 
 # Phase 2
@@ -35,12 +35,12 @@ $sessionId2 = Start-SqlSizerSession -Database $database -ConnectionInfo $connect
 $query = New-Object -TypeName SqlSizerQuery
 $query.Schema = "Person"
 $query.Table = "Address"
-$query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal traversal
+$query.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
 $query.KeyColumns = @('AddressID')
 $query.Where = "[`$table].AddressID IN (SELECT AddressID FROM SqlSizer_$($sessionId).Result_Person_Address)"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId2
-# Phase 2: Use Find-RemovalSubset for removal traversal (Blue = InboundOnly)
+# Phase 2: Use Find-RemovalSubset with the InboundOnly removal policy
 $null = Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
 
 Remove-FoundSubsetFromDatabase -Database $database -ConnectionInfo $connection -DatabaseInfo $info -Step 100000 -SessionId $sessionId2

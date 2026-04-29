@@ -17,7 +17,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # 4. Define what records to start with
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Include these records and their dependencies
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -28,7 +28,7 @@ $query.Top = 5
 Initialize-StartSet -Database $database -ConnectionInfo $connection `
     -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# 6. Find the complete subset by following foreign key relationships
+# 6. Find the minimal dependency closure by following outgoing foreign key relationships
 Find-Subset -Database $database -ConnectionInfo $connection `
     -DatabaseInfo $info -SessionId $sessionId
 

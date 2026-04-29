@@ -18,7 +18,7 @@ function Get-NewTraversalState
         
         This function implements the core state transition logic for graph traversal:
         - Outgoing FKs: Follow references (Include/Pending propagate, Exclude stops)
-        - Incoming FKs: Find dependents (Include -> Pending in non-full search)
+        - Incoming FKs: Find dependents only for full-closure/removal policies
         - Configuration overrides can force specific states per table
     .PARAMETER Direction
         The traversal direction (Outgoing = following FKs, Incoming = finding dependents)
@@ -453,13 +453,41 @@ function Get-AdditionalWhereConditions
         $conditions += "src.Depth < $($Constraints.MaxDepth)"
     }
 
-    # Prevent cycles in non-full search
-    if (-not $FullSearch)
-    {
-        $conditions += "((src.Fk <> $FkId) OR (src.Fk IS NULL))"
-    }
-
     return $conditions
+}
+
+function Get-IncludedTraversalStateValues
+{
+    <#
+    .SYNOPSIS
+        Returns the traversal states that represent rows belonging to an output closure.
+    .DESCRIPTION
+        Discovery/bookkeeping states should not leak into subset outputs. Include and
+        IncludeFull belong to normal subset closures; InboundOnly belongs to removal
+        closures. Pending and Exclude are intentionally omitted.
+    #>
+    [CmdletBinding()]
+    [OutputType([int[]])]
+    param ()
+
+    return @(
+        [int][TraversalState]::Include,
+        [int][TraversalState]::InboundOnly,
+        [int][TraversalState]::IncludeFull
+    )
+}
+
+function Get-IncludedTraversalStateSqlList
+{
+    <#
+    .SYNOPSIS
+        Returns a SQL-ready list of output traversal state values.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param ()
+
+    return [string]::Join(', ', (Get-IncludedTraversalStateValues))
 }
 
 Export-ModuleMember -Function @(
@@ -471,5 +499,7 @@ Export-ModuleMember -Function @(
     'Get-TargetTableInfo',
     'Test-ShouldSkipTable',
     'Get-JoinConditions',
-    'Get-AdditionalWhereConditions'
+    'Get-AdditionalWhereConditions',
+    'Get-IncludedTraversalStateValues',
+    'Get-IncludedTraversalStateSqlList'
 )

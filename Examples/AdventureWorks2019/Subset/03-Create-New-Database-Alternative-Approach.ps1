@@ -1,4 +1,4 @@
-## Example that shows how to create a new database with the subset of data based on queries which define initial data with color map
+## Example that shows how to create a new database with a subset of data using TraversalConfiguration
 
 # Connection settings
 $server = "localhost"
@@ -19,7 +19,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -36,8 +36,8 @@ foreach ($table in $info.Tables)
 
     if ($table.TableName -in @('Person'))
     {
-        # Use StateOverride instead of ForcedColor for modern configuration
-        $rule.SetStateOverride([TraversalState]::Pending)
+        # Use IncludeFull when this table should expand as a per-table full closure.
+        $rule.SetStateOverride([TraversalState]::IncludeFull)
     }
 
     # Use TraversalConstraints instead of Condition for modern configuration
@@ -89,11 +89,11 @@ foreach ($table in $info.Tables)
 # Example 5: Chained configuration
 # $config.AddIgnoredTable("dbo", "Logs").
 #         AddRule((New-Object TraversalRule -ArgumentList "Sales", "Customers").SetTop(10)).
-#         AddRule((New-Object TraversalRule -ArgumentList "Sales", "Orders").SetMaxDepth(3).SetStateOverride([TraversalState]::Pending))
+#         AddRule((New-Object TraversalRule -ArgumentList "Sales", "Orders").SetMaxDepth(3).SetStateOverride([TraversalState]::IncludeFull))
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm with modern TraversalConfiguration
+# Find subset using the closure engine with modern TraversalConfiguration
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -TraversalConfiguration $config -UseDfs $true -SessionId $sessionId
 
 # Get subset info

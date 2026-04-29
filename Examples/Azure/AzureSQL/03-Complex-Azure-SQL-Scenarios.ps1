@@ -27,7 +27,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "SalesLT"
 $query.Table = "Customer"
 $query.KeyColumns = @('CustomerID')
@@ -35,7 +35,7 @@ $query.Top = 10
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm
+# Find subset using minimal dependency closure
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Get subset info

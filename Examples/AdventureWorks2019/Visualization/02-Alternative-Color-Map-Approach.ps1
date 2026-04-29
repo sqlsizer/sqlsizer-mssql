@@ -1,4 +1,4 @@
-## Example that shows color map feature
+## Example that shows an alternative traversal configuration approach
 
 # Connection settings
 $server = "localhost"
@@ -19,7 +19,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum instead of legacy Color
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -29,15 +29,15 @@ $query.OrderBy = "[`$table].LastName ASC"
 
 # Define traversal configuration using modern API
 $config = New-Object -Type TraversalConfiguration
+$ignored = @()
 foreach ($table in $info.Tables)
 {
     if ($table.TableName -eq "Password")
     {
         $rule = New-Object -Type TraversalRule -ArgumentList $table.SchemaName, $table.TableName
         
-        # Use StateOverride instead of ForcedColor for modern configuration
-        # Bidirectional traversal (was Purple in legacy)
-        $rule.StateOverride = New-Object -Type StateOverride -ArgumentList ([TraversalState]::Bidirectional)
+        # Use IncludeFull when a table should expand through incoming and outgoing FKs.
+        $rule.StateOverride = New-Object -Type StateOverride -ArgumentList ([TraversalState]::IncludeFull)
 
         # Use TraversalConstraints instead of Condition for modern configuration
         $rule.Constraints = New-Object -Type TraversalConstraints
@@ -49,7 +49,7 @@ foreach ($table in $info.Tables)
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm with modern TraversalConfiguration
+# Find subset using the closure engine with modern TraversalConfiguration
 Measure-Command {
     Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -TraversalConfiguration $config -SessionId $sessionId
 }

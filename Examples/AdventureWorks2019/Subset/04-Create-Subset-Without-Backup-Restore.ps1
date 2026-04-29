@@ -19,7 +19,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -36,7 +36,7 @@ $ignored.TableName = "ErrorLog"
 # Init start set
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm (forward traversal with ignored tables)
+# Find subset using minimal dependency closure with ignored tables
 Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -SessionId $sessionId
 
 # Create a new db with found subset of data

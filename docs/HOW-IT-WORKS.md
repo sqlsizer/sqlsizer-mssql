@@ -164,7 +164,7 @@ Every record discovered during subset search is assigned a **TraversalState** th
 |-------|------|-----------|--------------|---------------|
 | **Include** | `[TraversalState]::Include` | Must be in subset | Outgoing + Incoming (if FullSearch) | In subset |
 | **Exclude** | `[TraversalState]::Exclude` | Must NOT be in subset | None - stops here | Not in subset |
-| **Pending** | `[TraversalState]::Pending` | Discovered via incoming FKs (non-full search) | Outgoing only | Promoted to Include during traversal if reachable via Include path, otherwise Exclude |
+| **Pending** | `[TraversalState]::Pending` | Candidate/bookkeeping state | Outgoing only when explicitly present | Not returned in subset outputs unless promoted to Include |
 | **InboundOnly** | `[TraversalState]::InboundOnly` | For removal operations | Incoming only | Finds dependents |
 | **IncludeFull** | `[TraversalState]::IncludeFull` | Force incoming traversal for specific records | Outgoing + Incoming (always) | In subset |
 
@@ -213,7 +213,7 @@ The function `Get-NewTraversalState` in `TraversalHelpers.ps1` implements these 
 | Current State | Direction | FullSearch | New State | Explanation |
 |---------------|-----------|------------|-----------|-------------|
 | **Include** | Outgoing | - | Include | Referenced data must be included |
-| **Include** | Incoming | `$false` | Pending | Dependents discovered but not yet confirmed |
+| **Include** | Incoming | `$false` | *(no traverse)* | Minimal subset mode ignores dependents that reference the seed |
 | **Include** | Incoming | `$true` | Include | Full closure: include all dependents |
 | **IncludeFull** | Outgoing | - | Include | Follow dependencies normally |
 | **IncludeFull** | Incoming | - | Include | Always include dependents (per-record full search) |
@@ -224,7 +224,7 @@ The function `Get-NewTraversalState` in `TraversalHelpers.ps1` implements these 
 | **InboundOnly** | Outgoing | - | *(no traverse)* | Removal mode: only finds dependents |
 | **InboundOnly** | Incoming | - | InboundOnly | Continue finding dependents |
 
-The function `Test-ShouldTraverseDirection` controls whether traversal even occurs for a given State+Direction combination before `Get-NewTraversalState` is called.
+The function `Test-ShouldTraverseDirection` controls whether traversal even occurs for a given State+Direction combination before `Get-NewTraversalState` is called. In default subset mode this means `Include` follows outgoing dependencies only; `FullSearch`, `IncludeFull`, and removal mode opt into incoming traversal.
 
 ### FullSearch Mode
 
@@ -722,8 +722,8 @@ WHILE unprocessed operations exist:
        - If batch fully processed: Status → 1 (complete)
        - If batch limit hit: Status → NULL (re-queue)
 
-    5. Resolve-PendingStates (only for Include state, non-FullSearch):
-       - UPDATE all remaining Pending → Exclude in processing tables
+    5. Resolve-PendingStates (compatibility/candidate cleanup):
+       - UPDATE remaining Pending → Exclude in processing tables
 
     6. Save checkpoint (every CheckpointInterval iterations)
 
@@ -736,40 +736,25 @@ WHILE unprocessed operations exist:
 | **BFS** | `UseDfs = $false` | `Depth ASC, RemainingRecords DESC` | Even discovery, predictable progress |
 | **DFS** | `UseDfs = $true` | `RemainingRecords DESC` | Early results, deep narrow graphs |
 
-### Phase 3: State Resolution
+### Phase 3: Output Closure
 
-After traversal, any remaining **Pending** records are marked as **Exclude**:
+After traversal, output surfaces return only closure states: **Include**, **IncludeFull**, and **InboundOnly**. Any remaining **Pending** records are compatibility/candidate rows and are marked as **Exclude**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                     PENDING STATE HANDLING                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│   DURING TRAVERSAL (handled automatically in CTE queries):             │
-│   ┌─────────┐                                                          │
-│   │ Include │                                                          │
-│   └────┬────┘                                                          │
-│        │ incoming FK (non-full search)                                 │
-│        ▼                                                               │
-│   ┌─────────┐     outgoing FK      ┌─────────┐                        │
-│   │ Pending │ ─────────────────►   │ Pending │                        │
-│   └─────────┘                      └─────────┘                        │
-│        │                                │                              │
-│        │ If later found via Include path, promoted to Include         │
-│        ▼                                                               │
-│   ┌─────────┐                                                          │
-│   │ Include │ (promoted during traversal)                              │
-│   └─────────┘                                                          │
+│   DEFAULT MINIMAL SUBSET:                                              │
+│   - Include rows follow outgoing FKs only                              │
+│   - Incoming dependents are not discovered as Pending                  │
 │                                                                         │
-│   AFTER TRAVERSAL (final cleanup):                                     │
-│   - Any remaining Pending records → marked as Exclude                  │
-│   - These are orphaned dependents not reachable via Include paths     │
+│   FULL CLOSURE / INCLUDEFULL:                                          │
+│   - Incoming dependents are included directly                          │
 │                                                                         │
-│   KEY INSIGHT:                                                          │
-│   Pending→Include promotion happens DURING traversal, not after.       │
-│   When the CTE INSERT finds a record already exists as Pending,        │
-│   and the new discovery is via Include path, it immediately            │
-│   executes an UPDATE to promote the record's State to Include.         │
+│   OUTPUT FILTER:                                                       │
+│   - Include, IncludeFull, InboundOnly → visible in subset outputs      │
+│   - Pending, Exclude → hidden from subset outputs                      │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -896,7 +881,6 @@ NewRecords AS (
         INNER JOIN Sales.[Order] srcTable ON srcTable.CustomerID = tgt.CustomerID
         INNER JOIN SourceRecords src ON src.Key0 = srcTable.OrderID
     WHERE tgt.CustomerID IS NOT NULL
-        AND ((src.Fk <> 42) OR (src.Fk IS NULL))   -- cycle prevention
         AND NOT EXISTS (
             SELECT 1
             FROM SqlSizer_abc123.Sales_Customer existing
@@ -925,7 +909,6 @@ WHERE existing.[State] = 3   -- Pending
                 WHERE Status = 0 AND SessionId = 'abc123'
             )
                 AND tgt.CustomerID IS NOT NULL
-                AND ((src.Fk <> 42) OR (src.Fk IS NULL))
         ) nr
         WHERE existing.Key0 = nr.Key0
     );
@@ -957,9 +940,9 @@ GROUP BY Depth;
 
 **`@InsertedRows` table variable**: Captures the Depth of each inserted row via OUTPUT clause. This is used to create granular Operations entries grouped by depth.
 
-**Pending→Include promotion**: The UPDATE query runs after every INSERT when `NewState = Include`. It finds existing Pending records that match the same join conditions and promotes them. This handles the case where a record was first discovered as Pending (via incoming FK) and later rediscovered via an Include path.
+**Pending→Include promotion**: The UPDATE query runs after every INSERT when `NewState = Include`. It finds existing Pending records that match the same join conditions, promotes them, refreshes their provenance to the Include path, and queues them as Include work. This is retained for compatibility with explicit Pending/candidate rows.
 
-**Cycle detection**: The `((src.Fk <> $FkId) OR (src.Fk IS NULL))` WHERE clause prevents re-traversing the same FK that originally discovered a row. This is only active in non-FullSearch mode.
+**Cycle safety**: `NOT EXISTS` against the target processing table prevents inserting the same table key twice. That key-level deduplication is what stops cycles while still allowing valid self-referencing chains to continue until an already-seen row is reached.
 
 **NOT EXISTS deduplication**: Every CTE checks that the target record doesn't already exist in the processing table, ensuring each record is tracked exactly once.
 
@@ -1335,17 +1318,11 @@ The cache is keyed by table + state + direction because the generated SQL is ide
 
 For `Find-RemovalSubset`, the cache uses `##DEPTH##` and `##ITERATION##` placeholders that are string-replaced at execution time.
 
-### Cycle Detection
+### Cycle Safety
 
-Self-referential tables and circular FK chains are handled by this WHERE clause in non-FullSearch mode:
+Self-referential tables and circular FK chains are handled by key-level deduplication in the target processing table. Every traversal query checks `NOT EXISTS` before inserting a discovered row, so a row can be reached through many paths but only enters the closure once.
 
-```sql
-AND ((src.Fk <> 42) OR (src.Fk IS NULL))
-```
-
-This means: "don't re-traverse the same FK that originally discovered this row." Without this, a self-referential table like `Employee.ManagerID → Employee.EmployeeID` would cause infinite loops.
-
-In FullSearch mode (`$true`), this guard is disabled—the `NOT EXISTS` deduplication is sufficient because every record is only inserted once.
+This is deliberately based on row identity rather than FK-name suppression. A self-referential chain like `Employee.ManagerID -> Employee.EmployeeID` can keep walking up the hierarchy until it reaches a row already present in the closure.
 
 ### Composite Key Support
 

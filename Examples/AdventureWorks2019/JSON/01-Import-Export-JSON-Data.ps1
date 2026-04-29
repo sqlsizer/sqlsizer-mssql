@@ -18,14 +18,14 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 # Define start set
 # Query 1: All persons with first name = 'Michael'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
 $query.Where = "[`$table].FirstName <> 'Michael'"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
-# Use refactored algorithm for forward subset finding
+# Use minimal dependency closure for subset finding
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -IgnoredTables @($ignored) -SessionId $sessionId
 
 $json = Get-SubsetTableJson -Database $database -ConnectionInfo $connection -SchemaName "Person" -TableName "Password" -DatabaseInfo $info -Secure $false -SessionId $sessionId

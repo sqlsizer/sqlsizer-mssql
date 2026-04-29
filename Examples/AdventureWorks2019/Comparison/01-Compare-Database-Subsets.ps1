@@ -18,7 +18,7 @@ $sessionId2 = Start-SqlSizerSession -Database $database -ConnectionInfo $connect
 
 # Define start set
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -26,7 +26,7 @@ $query.Where = "[`$table].FirstName = 'Rob'"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm
+# Find subset using minimal dependency closure
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -FullSearch $false -SessionId $sessionId
 $subsetGuid = Save-Subset -Database $database -ConnectionInfo $connection -SubsetName "Subset_from_example_17" -DatabaseInfo $info -SessionId $sessionId
 
@@ -41,11 +41,10 @@ Test-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $
 Enable-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 Enable-AllTablesTriggers -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
-# Use refactored algorithm for forward subset finding
+# Use minimal dependency closure for subset finding
 Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info  -FullSearch $false -SessionId $sessionId2
 $subsetGuid2 = Save-Subset -Database $database -ConnectionInfo $connection -SubsetName "Subset_from_example_17_after_little_change" -DatabaseInfo $info -SessionId $sessionId2
 
 $compareResult = Compare-SavedSubsets -SourceDatabase $database -TargetDatabase $database -SourceSubsetGuid $subsetGuid -TargetSubsetGuid $subsetGuid2 -ConnectionInfo $connection
 
 $compareResult
-

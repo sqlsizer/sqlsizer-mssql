@@ -249,18 +249,22 @@ FROM NewRecords;
 $(if ($NewState -eq [TraversalState]::Include) {
 @"
 UPDATE existing
-SET [State] = $([int][TraversalState]::Include)
+SET [State] = $([int][TraversalState]::Include),
+    Source = $SourceTableId,
+    Fk = $FkId,
+    Depth = nr.Depth,
+    Iteration = $Iteration
+OUTPUT inserted.Depth INTO @InsertedRows
 FROM $TargetProcessing existing
-WHERE existing.[State] = $([int][TraversalState]::Pending)
-    AND EXISTS (
-        SELECT 1 FROM (
-            SELECT DISTINCT $targetKeyList
-            $fromClauseForUpdate
-                AND tgt.$($targetColumns[0].Name) IS NOT NULL
-                $whereClause
-        ) nr
-        WHERE $updateKeyClause
-    );
+INNER JOIN (
+    SELECT DISTINCT
+        $targetKeyList,
+        src.Depth + 1 AS Depth
+    $fromClauseForUpdate
+        AND tgt.$($targetColumns[0].Name) IS NOT NULL
+        $whereClause
+) nr ON $updateKeyClause
+WHERE existing.[State] = $([int][TraversalState]::Pending);
 "@
 } else { "" })
 

@@ -19,7 +19,7 @@ $sessionId2 = Start-SqlSizerSession -Database $database -ConnectionInfo $connect
 # Find subset
 # Query 1: top 100 persons with peron types EM
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -27,20 +27,20 @@ $query.Where = "[`$table].PersonType = 'EM'"
 $query.Top = 100
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
-# Use refactored algorithm for forward subset finding
+# Use minimal dependency closure for subset finding
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 $subset1 = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Query 2: All persons with first name = 'Wanida'
 $query2 = New-Object -TypeName SqlSizerQuery
-$query2.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query2.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query2.Schema = "Person"
 $query2.Table = "Person"
 $query2.KeyColumns = @('BusinessEntityID')
 $query2.Where = "[`$table].FirstName = 'Wanida'"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query2) -DatabaseInfo $info -SessionId $sessionId2
-# Use refactored algorithm for forward subset finding
+# Use minimal dependency closure for subset finding
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
 $subset2 = Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId2
 

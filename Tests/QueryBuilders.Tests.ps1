@@ -447,6 +447,29 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
         $result | Should -Match 'INSERT INTO SqlSizer\.Operations'
     }
 
+    It 'Queues promoted Pending rows as Include work' {
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::Include) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{} `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize -1 `
+            -FullSearch $false
+
+        $result | Should -Match 'OUTPUT inserted\.Depth INTO @InsertedRows'
+        $result | Should -Match 'Iteration = 5'
+        $result | Should -Match 'WHERE existing\.\[State\] = 3'
+    }
+
     It 'Includes FK name in comment' {
         $result = New-CTETraversalQuery `
             -SourceProcessing 'SqlSizer.Proc_Source' `

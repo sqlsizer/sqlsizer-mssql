@@ -18,7 +18,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 # Define start set
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  # Use modern TraversalState enum for forward traversal
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -33,7 +33,7 @@ $iteration = 0
 
 do
 {
-    # Use refactored algorithm for forward subset finding (Yellow = Pending/Include states)
+    # Use full closure: Include rows traverse both outgoing and incoming FKs.
     $result = Find-Subset -Interactive $true -Iteration $iteration -Database $database -ConnectionInfo $connection `
             -DatabaseInfo $info -FullSearch $true `
             -UseDfs $false -SessionId $sessionId
@@ -51,5 +51,3 @@ do
     $iteration += 1
 }
 while ($result.Finished -eq $false)
-
-

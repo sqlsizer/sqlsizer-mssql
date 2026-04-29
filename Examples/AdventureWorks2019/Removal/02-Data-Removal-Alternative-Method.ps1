@@ -21,7 +21,7 @@ Install-SqlSizer -Database $database -ConnectionInfo $connection -DatabaseInfo $
 # Define start set
 # Query 1: All persons with first name = 'Rob'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
+$query.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -29,7 +29,7 @@ $query.Where = "[`$table].FirstName = 'Rob'"
 
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Use the refactored removal subset algorithm (cleaner, more efficient)
+# Use the removal closure engine (incoming FK traversal)
 Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # end of script

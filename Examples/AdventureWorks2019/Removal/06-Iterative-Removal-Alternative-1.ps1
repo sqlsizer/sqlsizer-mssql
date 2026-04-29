@@ -26,7 +26,7 @@ while ($true)
 
     # Define start set
     $query = New-Object -TypeName SqlSizerQuery
-    $query.State = [TraversalState]::InboundOnly  # Use modern TraversalState enum for removal/incoming FK traversal
+    $query.State = [TraversalState]::InboundOnly  # Seed rows for the removal closure
     $query.Schema = "Person"
     $query.Table = "PhoneNumberType"
     $query.KeyColumns = @('PhoneNumberTypeID')
@@ -34,7 +34,7 @@ while ($true)
 
     Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-    # Use refactored removal subset algorithm (Blue = InboundOnly)
+    # Use the removal closure engine (InboundOnly policy)
     $null = Find-RemovalSubset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
     $empty = Test-FoundSubsetIsEmpty -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId

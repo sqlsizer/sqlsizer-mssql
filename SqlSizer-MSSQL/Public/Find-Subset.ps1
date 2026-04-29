@@ -274,8 +274,7 @@ function Find-Subset
             $null = Invoke-SqlcmdEx -Sql $batchedSql -Database $Database -ConnectionInfo $ConnectionInfo
         }
 
-        # NO SPLIT OPERATION - Pending states are resolved later
-        # This eliminates the confusing Yellow -> Red+Green duplication
+        # Candidate/bookkeeping states are resolved after the closure is complete.
     }
 
     function Resolve-PendingStates
@@ -284,13 +283,14 @@ function Find-Subset
         .SYNOPSIS
             Marks remaining Pending states as Exclude after traversal completes.
         .DESCRIPTION
-            Pending records are those reached via incoming FKs in non-full search.
-            During traversal, Pending records that are also reachable via Include paths
-            are automatically promoted to Include (handled in New-CTETraversalQuery).
+            Pending is a compatibility/candidate state. The default minimal subset
+            policy does not emit Pending rows because Include does not traverse
+            incoming FKs unless FullSearch is enabled. If callers seed or override
+            rows as Pending, those rows are not part of output unless promoted.
             
             This function marks any remaining Pending records as Exclude - these are
-            records that were discovered as dependents but never confirmed as necessary
-            for the subset (not reachable from any Include path).
+            records that were discovered as candidates but never confirmed as necessary
+            for the subset.
         #>
         param
         (

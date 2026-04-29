@@ -32,6 +32,7 @@ function Get-SubsetTableRows
     )
 
     $structure = [Structure]::new($DatabaseInfo)
+    $includedStates = Get-IncludedTraversalStateSqlList
 
     foreach ($table in $DatabaseInfo.Tables)
     {
@@ -52,7 +53,7 @@ function Get-SubsetTableRows
                     }
                 }
 
-                $sql = "SELECT DISTINCT '$($table.SchemaName)' as SchemaName,'$($table.TableName)' as TableName, $($keys) FROM $($processing) WHERE ([Iteration] = $Iteration OR $Iteration = -1)"
+                $sql = "SELECT DISTINCT '$($table.SchemaName)' as SchemaName,'$($table.TableName)' as TableName, $($keys) FROM $($processing) WHERE ([Iteration] = $Iteration OR $Iteration = -1) AND [State] IN ($includedStates)"
                 $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
                 return $rows
             }
@@ -105,7 +106,8 @@ function Get-SubsetTableRows
                 $sql = "SELECT '$($table.SchemaName)' as SchemaName, '$($table.TableName)' as TableName, $($columns)
                         FROM $($processing) p
                         INNER JOIN $($table.SchemaName).$($table.TableName) t ON $($cond)
-                        WHERE ([Iteration] = $Iteration OR $Iteration = -1)"
+                        WHERE ([Iteration] = $Iteration OR $Iteration = -1)
+                            AND p.[State] IN ($includedStates)"
                 $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
                 return $rows
             }

@@ -1,4 +1,4 @@
-## Example that shows color maps feature
+## Example that shows traversal configuration visualization
 
 # Connection settings
 $server = "localhost"
@@ -19,7 +19,7 @@ $sessionId = Start-SqlSizerSession -Database $database -ConnectionInfo $connecti
 
 # Query 1: 10 persons with first name = 'John'
 $query = New-Object -TypeName SqlSizerQuery
-$query.State = [TraversalState]::Include  
+$query.State = [TraversalState]::Include  # Seed rows for the subset closure
 $query.Schema = "Person"
 $query.Table = "Person"
 $query.KeyColumns = @('BusinessEntityID')
@@ -33,7 +33,7 @@ $ignored = @()
 # Init start set
 Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($query) -DatabaseInfo $info -SessionId $sessionId
 
-# Find subset using refactored algorithm with modern TraversalConfiguration
+# Find subset using the closure engine with modern TraversalConfiguration
 $result = Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables $ignored -DatabaseInfo $info -SessionId $sessionId
 Write-Host "Find-Subset result: Finished=$($result.Finished), CompletedIterations=$($result.CompletedIterations)"
 

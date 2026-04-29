@@ -57,6 +57,7 @@ function GetExportViewsTableJoin
 
     $primaryKey = $TableInfo.PrimaryKey
     $signature = $Structure.Tables[$TableInfo]
+    $includedStates = Get-IncludedTraversalStateSqlList
 
     if (($null -eq $signature) -or ($signature -eq ""))
     {
@@ -76,7 +77,8 @@ function GetExportViewsTableJoin
     }
 
     $sql = " (SELECT DISTINCT $([string]::Join(',', $select))
-             FROM $($processing) p) rr ON $([string]::Join(' and ', $join))"
+             FROM $($processing) p
+             WHERE p.[State] IN ($includedStates)) rr ON $([string]::Join(' and ', $join))"
 
     return $sql
 }

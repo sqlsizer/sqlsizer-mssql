@@ -15,7 +15,7 @@ A PowerShell module for extracting referentially-consistent data subsets from SQ
 | **No size limits** | Works with any database or subset size |
 | **Composite key support** | Handles any PK/FK column count and data types |
 | **Server-side processing** | All heavy lifting in SQL Server - minimal PowerShell memory |
-| **Graph traversal** | BFS or DFS with cycle detection |
+| **Graph traversal** | BFS or DFS with set-based deduplication for cycle safety |
 | **CTE-based SQL** | Optimized, readable query generation |
 | **Checkpoint/resume** | Save progress and recover from crashes on long operations |
 | **Traversal configuration** | Per-table state overrides, depth limits, row caps, ignored tables |
@@ -72,9 +72,11 @@ Every discovered record is assigned a state that controls its inclusion and how 
 |-------|-------|---------|--------------|
 | `Include` | 1 | Record is in the subset | Outgoing + Incoming (if FullSearch) |
 | `Exclude` | 2 | Record is excluded | None - stops traversal |
-| `Pending` | 3 | Discovered but undecided | Outgoing only; promoted to Include if reachable via Include path |
+| `Pending` | 3 | Candidate/bookkeeping state | Not returned in subset outputs unless promoted to Include |
 | `InboundOnly` | 4 | For removal operations | Incoming only - finds dependents |
 | `IncludeFull` | 5 | Include with forced incoming traversal | Outgoing + Incoming (always) |
+
+Subset outputs include only closure states: `Include`, `IncludeFull`, and `InboundOnly`. `Pending` and `Exclude` rows can exist as traversal bookkeeping, but they are filtered from result views, exports, row reads, and table statistics.
 
 ### FullSearch Mode
 
