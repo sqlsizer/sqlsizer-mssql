@@ -11,7 +11,7 @@
     1. TraversalState enum for explicit row classification
     2. Unified traversal function for both directions
     3. Proper state resolution without data duplication
-    4. Cycle detection with path tracking
+    4. Set-based key deduplication for cycle safety
     5. Batch processing with set-based operations
     6. CTE-based SQL generation for clarity
 

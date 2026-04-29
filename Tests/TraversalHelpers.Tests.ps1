@@ -62,14 +62,14 @@ Describe 'Get-NewTraversalState' {
     }
 
     Context 'Incoming Direction' {
-        It 'Include state becomes Pending when FullSearch is false' {
+        It 'Include state resolves to Exclude sentinel when FullSearch is false' {
             $result = Get-NewTraversalState `
                 -Direction ([TraversalDirection]::Incoming) `
                 -CurrentState ([TraversalState]::Include) `
                 -Fk $mockFk `
                 -FullSearch $false
 
-            $result | Should -Be ([TraversalState]::Pending)
+            $result | Should -Be ([TraversalState]::Exclude)
         }
 
         It 'Include state remains Include when FullSearch is true' {
@@ -82,14 +82,14 @@ Describe 'Get-NewTraversalState' {
             $result | Should -Be ([TraversalState]::Include)
         }
 
-        It 'Pending state remains Pending' {
+        It 'Pending state resolves to Exclude sentinel' {
             $result = Get-NewTraversalState `
                 -Direction ([TraversalDirection]::Incoming) `
                 -CurrentState ([TraversalState]::Pending) `
                 -Fk $mockFk `
                 -FullSearch $false
 
-            $result | Should -Be ([TraversalState]::Pending)
+            $result | Should -Be ([TraversalState]::Exclude)
         }
 
         It 'Exclude state remains Exclude' {
@@ -120,6 +120,16 @@ Describe 'Get-NewTraversalState' {
                 -FullSearch $true
 
             $result | Should -Be ([TraversalState]::Include)
+        }
+
+        It 'InboundOnly state remains InboundOnly' {
+            $result = Get-NewTraversalState `
+                -Direction ([TraversalDirection]::Incoming) `
+                -CurrentState ([TraversalState]::InboundOnly) `
+                -Fk $mockFk `
+                -FullSearch $false
+
+            $result | Should -Be ([TraversalState]::InboundOnly)
         }
     }
 
@@ -604,6 +614,14 @@ Describe 'Get-IncludedTraversalStateValues' {
 
         $result | Should -Not -Contain ([int][TraversalState]::Pending)
         $result | Should -Not -Contain ([int][TraversalState]::Exclude)
+    }
+}
+
+Describe 'Get-IncludedTraversalStateSqlList' {
+    It 'Returns a deterministic SQL list for output closure filters' {
+        $result = Get-IncludedTraversalStateSqlList
+
+        $result | Should -Be '1, 4, 5'
     }
 }
 

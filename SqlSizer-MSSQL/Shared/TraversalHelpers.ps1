@@ -104,18 +104,22 @@ function Get-NewTraversalState
     {
         if ($CurrentState -eq [TraversalState]::Include)
         {
-            if ($FullSearch) { 
-                $newState = [TraversalState]::Include 
-            } else { 
-                $newState = [TraversalState]::Pending 
-            }
+            $newState = if ($FullSearch) { [TraversalState]::Include } else { [TraversalState]::Exclude }
         }
         elseif ($CurrentState -eq [TraversalState]::IncludeFull)
         {
             # IncludeFull always traverses incoming and marks found rows as Include
             $newState = [TraversalState]::Include
         }
-        # Pending and Exclude do not traverse incoming
+        elseif ($CurrentState -eq [TraversalState]::InboundOnly)
+        {
+            $newState = [TraversalState]::InboundOnly
+        }
+        else
+        {
+            # Pending and Exclude do not traverse incoming.
+            $newState = [TraversalState]::Exclude
+        }
     }
 
     Write-Verbose "Traversal configuration override check for FK: $($Fk.Name)"

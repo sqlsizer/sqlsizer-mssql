@@ -7,9 +7,10 @@
     Respects the SqlSizerQuery.State property, allowing you to define starting sets with 
     different traversal behaviors:
     
-    - TraversalState.Pending: Records need evaluation (for forward subset finding)
-    - TraversalState.Include: Records explicitly included in subset
+    - TraversalState.Include: Records explicitly included in the subset closure
+    - TraversalState.IncludeFull: Seed records that also pull incoming FK dependents
     - TraversalState.InboundOnly: Records for removal traversal (only incoming FKs)
+    - TraversalState.Pending: Compatibility/bookkeeping records, not output unless promoted
     
     These rows serve as the "seed" data that forms the foundation of the subset. Related records 
     will be discovered through foreign key traversal during subsequent Find-Subset or 
@@ -42,9 +43,9 @@
     - StartIteration: The iteration number used
 
 .EXAMPLE
-    # Forward traversal (subset finding)
+    # Subset closure traversal
     $query = New-Object -TypeName SqlSizerQuery
-    $query.State = [TraversalState]::Pending
+    $query.State = [TraversalState]::Include
     $query.Schema = "Person"
     $query.Table = "Person"
     $query.KeyColumns = @('BusinessEntityID')
@@ -53,7 +54,7 @@
     $query.OrderBy = "[`$table].LastName ASC"
     
     $result = Initialize-StartSet -Queries @($query) -Database $database -DatabaseInfo $info -ConnectionInfo $connection -SessionId $sessionId
-    Write-Host "Initialized $($result.TotalRowsInserted) rows for forward traversal"
+    Write-Host "Initialized $($result.TotalRowsInserted) rows for subset closure traversal"
 
 .EXAMPLE
     # Removal traversal (data removal)
@@ -69,7 +70,8 @@
 
 .NOTES
     - SqlSizerQuery.State property is RESPECTED - rows are marked with the specified TraversalState
-    - Use TraversalState.Pending for forward subset finding (Find-Subset)
+    - Use TraversalState.Include for normal subset finding (Find-Subset)
+    - Use TraversalState.IncludeFull when seed rows should also traverse incoming foreign keys
     - Use TraversalState.InboundOnly for removal operations (Find-RemovalSubset)
     - Each query must specify Schema, Table, KeyColumns, and State
     - Tables must have a primary key to be used for subsetting
@@ -197,7 +199,7 @@ function Initialize-StartSet
         $processingTable = $Structure.GetProcessingName($signature, $SessionId)
         
         # Build INSERT statement to populate processing table with initial subset rows
-        # Processing table schema: KeyColumns..., State, ParentTable, ParentIteration, ChildTable, Iteration
+        # Processing table schema: KeyColumns..., State, Source, Depth, Fk, Iteration
         $sql = "INSERT INTO $processingTable SELECT $topClause"
 
         # Add key columns (using -join for efficiency)
@@ -206,11 +208,11 @@ function Initialize-StartSet
 
         # Add state and metadata columns
         # State: Use the TraversalState specified in SqlSizerQuery.State property
-        # ParentTable: NULL (no parent for starting set)
-        # ParentIteration: 0 (starting iteration)
-        # ChildTable: NULL (no child yet)
+        # Source: NULL (no parent table for starting set)
+        # Depth: 0 (starting depth)
+        # Fk: NULL (no FK path yet)
         # Iteration: $StartIteration (current iteration)
-        $sql += "$([int]$query.State) as [State], NULL as [ParentTable], 0 as [ParentIteration], NULL as [ChildTable], $StartIteration as [Iteration]"
+        $sql += "$([int]$query.State) as [State], NULL as [Source], 0 as [Depth], NULL as [Fk], $StartIteration as [Iteration]"
         $sql += " FROM $($query.Schema).$($query.Table) as $tableAlias"
 
         # Add WHERE clause if specified and not empty

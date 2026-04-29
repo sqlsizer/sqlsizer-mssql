@@ -466,7 +466,10 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -FullSearch $false
 
         $result | Should -Match 'OUTPUT inserted\.Depth INTO @InsertedRows'
+        $result | Should -Match 'SET \[State\] = 1'
+        $result | Should -Match 'Depth = nr\.Depth'
         $result | Should -Match 'Iteration = 5'
+        $result | Should -Match 'src\.Depth \+ 1 AS Depth'
         $result | Should -Match 'WHERE existing\.\[State\] = 3'
     }
 

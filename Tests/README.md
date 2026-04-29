@@ -5,8 +5,8 @@ This directory contains unit tests and integration tests for the SqlSizer-MSSQL 
 ## Prerequisites
 
 ```powershell
-# Install Pester
-Install-Module -Name Pester -Force -SkipPublisherCheck
+# Install Pester 5+
+Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -SkipPublisherCheck
 
 # For integration tests: SQL Server instance (local or remote)
 ```
@@ -17,7 +17,7 @@ Install-Module -Name Pester -Force -SkipPublisherCheck
 
 ```powershell
 # Unit tests only (no database required)
-Invoke-Pester -Path .\Tests\ -Exclude *Integration*
+Invoke-Pester -Path .\Tests\*.Tests.ps1 -ExcludePath .\Tests\*Integration.Tests.ps1
 
 # Integration tests (requires SQL Server)
 .\Tests\Run-IntegrationTests.ps1 -DataSize Tiny
@@ -27,10 +27,10 @@ Invoke-Pester -Path .\Tests\ -Exclude *Integration*
 
 ```powershell
 # From the repository root
-Invoke-Pester -Path .\Tests\
+Invoke-Pester -Path .\Tests\*.Tests.ps1 -ExcludePath .\Tests\*Integration.Tests.ps1
 
 # With detailed output
-Invoke-Pester -Path .\Tests\ -Output Detailed
+Invoke-Pester -Path .\Tests\*.Tests.ps1 -ExcludePath .\Tests\*Integration.Tests.ps1 -Output Detailed
 ```
 
 ### Run specific test files
@@ -81,14 +81,15 @@ Invoke-Pester -Configuration $config
   - `Test-ShouldSkipTable` - Table skip logic
   - `Get-JoinConditions` - SQL JOIN generation
   - `Get-AdditionalWhereConditions` - WHERE clause generation
+  - `Get-IncludedTraversalStateValues` / `Get-IncludedTraversalStateSqlList` - Output closure state filters
 
 - **QueryBuilders.Tests.ps1** - Tests for SQL query builders
   - `New-GetNextOperationQuery` - BFS/DFS query generation
   - `New-MarkOperationInProgressQuery` - Operation marking
   - `New-CompleteOperationsQuery` - Operation completion
   - `New-GetIterationStatisticsQuery` - Statistics retrieval
-  - `New-ExcludePendingQuery` - Pending exclusion (marks orphaned Pending as Exclude)
-  - `New-CTETraversalQuery` - Main traversal CTE query (includes Pending→Include promotion)
+  - `New-ExcludePendingQuery` - Pending exclusion (marks bookkeeping Pending as Exclude)
+  - `New-CTETraversalQuery` - Main traversal CTE query (including Pending-to-Include promotion)
 
 - **Find-Subset.Integration.Tests.ps1** - End-to-end tests against real database
   - Basic FK traversal (single/multi-hop chains)
@@ -99,6 +100,8 @@ Invoke-Pester -Configuration $config
   - Composite keys (2 and 3 column PKs)
   - Nullable FKs
   - FullSearch mode (incoming FK handling)
+  - IncludeFull scoped incoming traversal
+  - Output closure state filtering
   - TraversalConfiguration (MaxDepth, Top, StateOverride)
   - IgnoredTables
   - BFS vs DFS comparison

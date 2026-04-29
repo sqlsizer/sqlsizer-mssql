@@ -53,6 +53,7 @@ if (-not (Get-Module -Name dbatools)) {
 # Import SqlSizer module with Global scope - this loads the types globally
 Write-Host "Loading SqlSizer-MSSQL module..." -ForegroundColor Cyan
 Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Global
+Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
 
 # Set environment variables for the test
 $env:SQLSIZER_TEST_DATASIZE = $DataSize
