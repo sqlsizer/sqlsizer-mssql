@@ -457,7 +457,7 @@ function Get-AdditionalWhereConditions
         $conditions += "src.Depth < $($Constraints.MaxDepth)"
     }
 
-    return $conditions
+    return ,$conditions
 }
 
 function Get-IncludedTraversalStateValues
