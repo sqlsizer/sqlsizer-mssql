@@ -192,12 +192,9 @@ function Find-RemovalSubset
             $selectColumns += "$columnValue AS Key$selIdx"
         }
 
-        # Build TOP clause
+        # MaxBatchSize limits source rows through the operation row-number window.
+        # Do not TOP the dependent rows found from those source rows.
         $topClause = ""
-        if ($MaxBatchSize -ne -1)
-        {
-            $topClause = "TOP ($MaxBatchSize)"
-        }
 
         # Build primary key join conditions for NOT EXISTS clause (using FK table's PK)
         $pkJoinConditions = @()
@@ -214,10 +211,29 @@ function Find-RemovalSubset
         # Note: Processing table columns are: Key0..N, [State], [Source], [Depth], [Fk], [Iteration]
         $query = @"
 -- Find incoming references from $($Fk.FkSchema).$($Fk.FkTable) to $($Table.SchemaName).$($Table.TableName)
-;WITH SourceRecords AS (
-    SELECT $($sourceColumns -join ', ')
+;WITH SourceRecordCandidates AS (
+    SELECT $($sourceColumns -join ', '), [State], [Source], [Depth], [Fk], [Iteration],
+        ROW_NUMBER() OVER (
+            PARTITION BY [State], [Source], [Depth], [Fk], [Iteration]
+            ORDER BY Id
+        ) AS BatchRowNumber
     FROM $processing
-    WHERE Depth = $Depth
+    WHERE [State] = $Color
+        AND [Depth] = $Depth
+),
+SourceRecords AS (
+    SELECT $(($sourceColumns | ForEach-Object { "s.$_" }) -join ', ')
+    FROM SourceRecordCandidates s
+    INNER JOIN SqlSizer.Operations o ON o.[Table] = $tableId
+        AND o.[State] = s.[State]
+        AND o.[Depth] = s.[Depth]
+        AND o.[FoundIteration] = s.[Iteration]
+        AND ((o.[Source] = s.[Source]) OR (o.[Source] IS NULL AND s.[Source] IS NULL))
+        AND ((o.[Fk] = s.[Fk]) OR (o.[Fk] IS NULL AND s.[Fk] IS NULL))
+        AND o.[Status] = 0
+        AND o.[SessionId] = '$SessionId'
+    WHERE s.BatchRowNumber > ISNULL(o.ProcessedIteration, 0)
+        AND s.BatchRowNumber <= o.Processed
 ),
 NewRecords AS (
     SELECT $topClause
@@ -242,22 +258,6 @@ FROM NewRecords;
 -- Record operation
 DECLARE @RowCount INT = @@ROWCOUNT;
 "@
-
-        if ($MaxBatchSize -ne -1)
-        {
-            # Reset operation status if we hit the batch limit
-            $query += @"
-
-IF (@RowCount = $MaxBatchSize)
-BEGIN
-    UPDATE SqlSizer.Operations 
-    SET [Status] = NULL 
-    WHERE [SessionId] = '$SessionId' 
-        AND [Status] = 0 
-        AND [Table] = $tableId;
-END
-"@
-        }
 
         $query += @"
 
@@ -416,7 +416,9 @@ WHERE [Table] = $TableId
             {
                 $updateQuery = @"
 UPDATE SqlSizer.Operations 
-SET [Status] = 0, [Processed] = [ToProcess] 
+SET [Status] = 0,
+    [ProcessedIteration] = [Processed],
+    [Processed] = [ToProcess]
 WHERE [Id] = $($operation.Id);
 "@
                 $null = Invoke-SqlcmdEx -Sql $updateQuery -Database $Database -ConnectionInfo $ConnectionInfo
@@ -446,6 +448,7 @@ WHERE [Id] = $($operation.Id);
                 $updateQuery = @"
 UPDATE SqlSizer.Operations 
 SET [Status] = 0, 
+    [ProcessedIteration] = [Processed],
     [Processed] = [Processed] + $processAmount 
 WHERE [Id] = $($operation.Id);
 "@
@@ -470,7 +473,8 @@ WHERE [Id] = $($operation.Id);
         # Reset operations that weren't fully processed
         $resetQuery = @"
 UPDATE SqlSizer.Operations 
-SET [Status] = NULL 
+SET [Status] = NULL,
+    [ProcessedIteration] = NULL
 WHERE [Status] = 0 
     AND [ToProcess] <> [Processed] 
     AND [SessionId] = '$SessionId';
@@ -598,7 +602,9 @@ WHERE [Status] = 0
             # Reset any abandoned in-progress operations
             $resetSql = @"
 UPDATE SqlSizer.Operations
-SET Status = NULL, Processed = 0
+SET Status = NULL,
+    Processed = ISNULL(ProcessedIteration, Processed),
+    ProcessedIteration = NULL
 WHERE Status = 0 AND SessionId = '$SessionId';
 "@
             $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo

@@ -40,6 +40,11 @@ Write-Host ""
 # Import Pester
 Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
 
+# Load module types/functions before Pester discovery. The focused wrapper scripts
+# do this already; the aggregate runner needs the same setup for typed tests.
+$modulePath = Split-Path -Parent $PSScriptRoot
+Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Global -ErrorAction Stop
+
 # Create Pester configuration
 $config = New-PesterConfiguration
 

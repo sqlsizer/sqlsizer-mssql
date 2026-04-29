@@ -420,7 +420,7 @@ ORDER BY o.Depth ASC, RemainingRecords DESC
             # Process all at once
             $query = @"
 UPDATE SqlSizer.Operations
-SET Status = 0, Processed = ToProcess
+SET Status = 0, ProcessedIteration = Processed, Processed = ToProcess
 WHERE [Table] = $($Operation.TableId)
     AND [State] = $state
     AND Depth = $($Operation.Depth)
@@ -435,11 +435,17 @@ WHERE [Table] = $($Operation.TableId)
             $query = @"
 DECLARE @Remaining INT = $MaxBatchSize;
 DECLARE @ProcessThisRow INT;
+DECLARE @OperationId INT;
 
 WHILE @Remaining > 0
 BEGIN
+    SET @OperationId = NULL;
+    SET @ProcessThisRow = NULL;
+
     -- Calculate how much to process from the next available row
-    SELECT TOP 1 @ProcessThisRow = 
+    SELECT TOP 1
+        @OperationId = Id,
+        @ProcessThisRow =
         CASE WHEN (ToProcess - Processed) <= @Remaining 
              THEN (ToProcess - Processed) 
              ELSE @Remaining 
@@ -450,21 +456,18 @@ BEGIN
         AND Depth = $($Operation.Depth)
         AND Status IS NULL
         AND SessionId = '$SessionId'
-        AND (ToProcess - Processed) > 0;
+        AND (ToProcess - Processed) > 0
+    ORDER BY Id;
     
-    IF @ProcessThisRow IS NULL OR @ProcessThisRow = 0
+    IF @OperationId IS NULL OR @ProcessThisRow IS NULL OR @ProcessThisRow = 0
         BREAK;
     
-    -- Update exactly one row
-    UPDATE TOP (1) SqlSizer.Operations
+    -- Update exactly the selected row
+    UPDATE SqlSizer.Operations
     SET Status = 0,
+        ProcessedIteration = Processed,
         Processed = Processed + @ProcessThisRow
-    WHERE [Table] = $($Operation.TableId)
-        AND [State] = $state
-        AND Depth = $($Operation.Depth)
-        AND Status IS NULL
-        AND SessionId = '$SessionId'
-        AND (ToProcess - Processed) > 0;
+    WHERE Id = @OperationId;
     
     IF @@ROWCOUNT = 0
         BREAK;
@@ -491,7 +494,8 @@ END
         $query = @"
 -- Reset operations that hit batch limit
 UPDATE SqlSizer.Operations
-SET Status = NULL
+SET Status = NULL,
+    ProcessedIteration = NULL
 WHERE Status = 0 
     AND ToProcess <> Processed
     AND SessionId = '$SessionId';
@@ -628,7 +632,9 @@ WHERE SessionId = '$SessionId'
             # Reset any abandoned in-progress operations
             $resetSql = @"
 UPDATE SqlSizer.Operations
-SET Status = NULL, Processed = 0
+SET Status = NULL,
+    Processed = ISNULL(ProcessedIteration, Processed),
+    ProcessedIteration = NULL
 WHERE Status = 0 AND SessionId = '$SessionId';
 "@
             $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo

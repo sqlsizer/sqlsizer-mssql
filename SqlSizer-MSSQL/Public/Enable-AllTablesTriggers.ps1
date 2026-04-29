@@ -17,7 +17,7 @@ function Enable-AllTablesTriggers
 
     foreach ($table in $DatabaseInfo.Tables)
     {
-        Disable-TableTriggers -Database $Database -ConnectionInfo $ConnectionInfo -SchemaName $table.SchemaName -TableName $table.TableName
+        Enable-TableTriggers -Database $Database -ConnectionInfo $ConnectionInfo -SchemaName $table.SchemaName -TableName $table.TableName
     }
 
     Write-Progress -Activity "Enabling all triggers on all tables" -Completed

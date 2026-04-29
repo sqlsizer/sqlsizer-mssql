@@ -99,7 +99,7 @@ function Remove-Table
                         # drop dependent indexes
                         foreach ($index in  $table.Indexes)
                         {
-                            $isPartofIndex = $null -ne ($index.Columns | Where-Object { $_.Name -eq $fkColumn.Name })
+                            $isPartofIndex = $null -ne ($index.Columns | Where-Object { $_ -eq $fkColumn.Name })
 
                             if ($isPartofIndex)
                             {
@@ -109,13 +109,13 @@ function Remove-Table
                                     continue
                                 }
 
-                                $sql = "DROP INDEX $($index.Name) ON TABLE [" + $table.SchemaName + "].[" + $table.TableName + "]"
+                                $sql = "DROP INDEX [$($index.Name)] ON [" + $table.SchemaName + "].[" + $table.TableName + "]"
                                 $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
                             }
                         }
 
                         # drop column
-                        $sql = "ALTER TABLE [" + $table.SchemaName + "].[" + $table.TableName + "] DROP COLUMN $($fkColumn.Name)"
+                        $sql = "ALTER TABLE [" + $table.SchemaName + "].[" + $table.TableName + "] DROP COLUMN [$($fkColumn.Name)]"
                         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
                     }
                 }

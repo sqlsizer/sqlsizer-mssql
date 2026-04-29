@@ -91,17 +91,6 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     INNER JOIN SourceRecords src ON $srcTableJoinClause
 "@
         
-        # Standalone FROM clause for UPDATE (doesn't use CTE)
-        $fromClauseForUpdate = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
-    INNER JOIN $SourceProcessing src ON $srcTableJoinClause
-WHERE src.Iteration IN (
-    SELECT FoundIteration 
-    FROM SqlSizer.Operations 
-    WHERE Status = 0 AND SessionId = '$SessionId'
-)
-"@
     }
     else # Incoming
     {
@@ -120,16 +109,6 @@ FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
     INNER JOIN SourceRecords src ON $joinClause
 "@
         
-        # Standalone FROM clause for UPDATE (doesn't use CTE)
-        $fromClauseForUpdate = @"
-FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
-    INNER JOIN $SourceProcessing src ON $joinClause
-WHERE src.Iteration IN (
-    SELECT FoundIteration 
-    FROM SqlSizer.Operations 
-    WHERE Status = 0 AND SessionId = '$SessionId'
-)
-"@
     }
 
     # Build select list for target keys
@@ -158,14 +137,67 @@ WHERE src.Iteration IN (
         ""
     }
 
-    # Get TOP clause
-    $topClause = Get-TopClause -MaxBatchSize $MaxBatchSize -Constraints $Constraints
-
     # Build source key list for SourceRecords CTE
     $sourceKeyList = (0..($sourceColumns.Count - 1) | ForEach-Object { "Key$_" }) -join ", "
+    $sourceKeyListFromSrc = (0..($sourceColumns.Count - 1) | ForEach-Object { "src.Key$_" }) -join ", "
+    $sourceKeyListFromSrcRows = (0..($sourceColumns.Count - 1) | ForEach-Object { "srcRows.Key$_" }) -join ", "
     
     # Build target key list for INSERT
     $targetKeyListForInsert = (0..($targetColumns.Count - 1) | ForEach-Object { "Key$_" }) -join ", "
+
+    # MaxBatchSize limits source rows via the operation row-number window below.
+    # TOP is reserved for table-specific traversal constraints to avoid dropping
+    # dependent rows found from the selected source batch.
+    $topClause = Get-TopClause -MaxBatchSize -1 -Constraints $Constraints
+
+    $sourceBatchJoinConditions = @(
+        "o.[Table] = $SourceTableId",
+        "o.[State] = {0}.[State]",
+        "o.Depth = {0}.Depth",
+        "o.FoundIteration = {0}.Iteration",
+        "((o.[Source] = {0}.[Source]) OR (o.[Source] IS NULL AND {0}.[Source] IS NULL))",
+        "((o.[Fk] = {0}.[Fk]) OR (o.[Fk] IS NULL AND {0}.[Fk] IS NULL))",
+        "o.Status = 0",
+        "o.SessionId = '$SessionId'"
+    )
+    $sourceBatchJoinClause = ($sourceBatchJoinConditions | ForEach-Object { $_ -f 'src' }) -join "`n        AND "
+    $sourceBatchJoinClauseForUpdate = ($sourceBatchJoinConditions | ForEach-Object { $_ -f 'srcRows' }) -join "`n        AND "
+    $sourceBatchWindowClause = "src.BatchRowNumber > ISNULL(o.ProcessedIteration, 0)`n        AND src.BatchRowNumber <= o.Processed"
+    $sourceBatchWindowClauseForUpdate = "srcRows.BatchRowNumber > ISNULL(o.ProcessedIteration, 0)`n        AND srcRows.BatchRowNumber <= o.Processed"
+
+    $sourceRecordsForUpdate = @"
+(
+    SELECT $sourceKeyListFromSrcRows, srcRows.Depth, srcRows.Fk
+    FROM (
+        SELECT $sourceKeyList, Depth, [Source], Fk, [State], Iteration,
+            ROW_NUMBER() OVER (
+                PARTITION BY [State], Depth, Iteration, [Source], Fk
+                ORDER BY Id
+            ) AS BatchRowNumber
+        FROM $SourceProcessing src
+    ) srcRows
+    INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClauseForUpdate
+    WHERE $sourceBatchWindowClauseForUpdate
+) src
+"@
+
+    if ($Direction -eq [TraversalDirection]::Outgoing)
+    {
+        $fromClauseForUpdate = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN $($SourceTable.SchemaName).$($SourceTable.TableName) srcTable ON $targetJoinClause
+    INNER JOIN $sourceRecordsForUpdate ON $srcTableJoinClause
+WHERE 1 = 1
+"@
+    }
+    else
+    {
+        $fromClauseForUpdate = @"
+FROM $($TargetTable.SchemaName).$($TargetTable.TableName) tgt
+    INNER JOIN $sourceRecordsForUpdate ON $joinClause
+WHERE 1 = 1
+"@
+    }
 
     # Build the query
     $directionLabel = if ($Direction -eq [TraversalDirection]::Outgoing) { 'OUTGOING' } else { 'INCOMING' }
@@ -180,14 +212,19 @@ WHERE src.Iteration IN (
 -- Traverse $directionLabel FK: $($Fk.Name)
 DECLARE @InsertedRows TABLE (Depth INT);
 
-WITH SourceRecords AS (
-    SELECT $sourceKeyList, Depth, Fk
+WITH SourceRecordCandidates AS (
+    SELECT $sourceKeyList, Depth, [Source], Fk, [State], Iteration,
+        ROW_NUMBER() OVER (
+            PARTITION BY [State], Depth, Iteration, [Source], Fk
+            ORDER BY Id
+        ) AS BatchRowNumber
     FROM $SourceProcessing src
-    WHERE src.Iteration IN (
-        SELECT FoundIteration 
-        FROM SqlSizer.Operations 
-        WHERE Status = 0 AND SessionId = '$SessionId'
-    )
+),
+SourceRecords AS (
+    SELECT $sourceKeyListFromSrc, src.Depth, src.Fk
+    FROM SourceRecordCandidates src
+    INNER JOIN SqlSizer.Operations o ON $sourceBatchJoinClause
+    WHERE $sourceBatchWindowClause
 ),
 NewRecords AS (
     SELECT DISTINCT $topClause
@@ -385,7 +422,7 @@ function New-MarkOperationInProgressQuery
         # Process all at once
         return @"
 UPDATE SqlSizer.Operations
-SET Status = 0, Processed = ToProcess
+SET Status = 0, ProcessedIteration = Processed, Processed = ToProcess
 WHERE [Table] = $TableId
     AND [State] = $State
     AND Depth = $Depth
@@ -400,11 +437,17 @@ WHERE [Table] = $TableId
         return @"
 DECLARE @Remaining INT = $MaxBatchSize;
 DECLARE @ProcessThisRow INT;
+DECLARE @OperationId INT;
 
 WHILE @Remaining > 0
 BEGIN
+    SET @OperationId = NULL;
+    SET @ProcessThisRow = NULL;
+
     -- Calculate how much to process from the next available row
-    SELECT TOP 1 @ProcessThisRow = 
+    SELECT TOP 1
+        @OperationId = Id,
+        @ProcessThisRow =
         CASE WHEN (ToProcess - Processed) <= @Remaining 
              THEN (ToProcess - Processed) 
              ELSE @Remaining 
@@ -415,21 +458,18 @@ BEGIN
         AND Depth = $Depth
         AND Status IS NULL
         AND SessionId = '$SessionId'
-        AND (ToProcess - Processed) > 0;
+        AND (ToProcess - Processed) > 0
+    ORDER BY Id;
     
-    IF @ProcessThisRow IS NULL OR @ProcessThisRow = 0
+    IF @OperationId IS NULL OR @ProcessThisRow IS NULL OR @ProcessThisRow = 0
         BREAK;
     
-    -- Update exactly one row
-    UPDATE TOP (1) SqlSizer.Operations
+    -- Update exactly the selected row
+    UPDATE SqlSizer.Operations
     SET Status = 0,
+        ProcessedIteration = Processed,
         Processed = Processed + @ProcessThisRow
-    WHERE [Table] = $TableId
-        AND [State] = $State
-        AND Depth = $Depth
-        AND Status IS NULL
-        AND SessionId = '$SessionId'
-        AND (ToProcess - Processed) > 0;
+    WHERE Id = @OperationId;
     
     IF @@ROWCOUNT = 0
         BREAK;
@@ -463,7 +503,8 @@ function New-CompleteOperationsQuery
     return @"
 -- Reset operations that hit batch limit
 UPDATE SqlSizer.Operations
-SET Status = NULL
+SET Status = NULL,
+    ProcessedIteration = NULL
 WHERE Status = 0 
     AND ToProcess <> Processed
     AND SessionId = '$SessionId';

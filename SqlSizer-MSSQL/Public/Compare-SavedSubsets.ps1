@@ -156,7 +156,7 @@ function Compare-SavedSubsets
         {
             $sql = "SELECT $([string]::Join(',', $keys))
             FROM $($TargetDatabase).[SqlSizerHistory].[SubsetTableRow_$($targetTable.PrimaryKeySize)] t
-            LEFT JOIN $($SourceDatabase).[SqlSizerHistory].[SubsetTableRow_$($sourceTable.PrimaryKeySize)] s ON s.TableId = $($targetTable.TableId) AND $([string]::Join(' AND ', $conds))
+            LEFT JOIN $($SourceDatabase).[SqlSizerHistory].[SubsetTableRow_$($sourceTable.PrimaryKeySize)] s ON s.TableId = $($sourceTable.TableId) AND $([string]::Join(' AND ', $conds))
             WHERE s.Key0 IS NULL AND t.TableId = $($targetTable.TableId)"
 
             $addedRows = Invoke-SqlcmdEx -Sql $sql -Database $SourceDatabase -ConnectionInfo $ConnectionInfo
@@ -170,8 +170,8 @@ function Compare-SavedSubsets
                 }
 
                 $added += [pscustomobject] @{
-                    SchemaName = $sourceTable.SchemaName
-                    TableName  = $sourceTable.TableName
+                    SchemaName = $targetTable.SchemaName
+                    TableName  = $targetTable.TableName
                     Key        = $key
                 }
             }
@@ -193,8 +193,8 @@ function Compare-SavedSubsets
                 }
 
                 $added += [pscustomobject] @{
-                    SchemaName = $sourceTable.SchemaName
-                    TableName  = $sourceTable.TableName
+                    SchemaName = $targetTable.SchemaName
+                    TableName  = $targetTable.TableName
                     Key        = $key
                 }
             }

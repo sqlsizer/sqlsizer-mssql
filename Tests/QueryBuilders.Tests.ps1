@@ -73,6 +73,7 @@ Describe 'New-MarkOperationInProgressQuery' {
                 -MaxBatchSize -1
 
             $result | Should -Match 'Processed = ToProcess'
+            $result | Should -Match 'ProcessedIteration = Processed'
             $result | Should -Not -Match 'DECLARE @Remaining'
         }
 
@@ -111,6 +112,7 @@ Describe 'New-MarkOperationInProgressQuery' {
                 -MaxBatchSize 1000
 
             $result | Should -Match 'DECLARE @Remaining INT = 1000'
+            $result | Should -Match 'DECLARE @OperationId INT'
             $result | Should -Match 'CASE'
             $result | Should -Match '@Remaining'
         }
@@ -124,6 +126,8 @@ Describe 'New-MarkOperationInProgressQuery' {
                 -MaxBatchSize 500
 
             $result | Should -Match '500'
+            $result | Should -Match 'ProcessedIteration = Processed'
+            $result | Should -Match 'WHERE Id = @OperationId'
         }
 
         It 'Filters by @Remaining > 0' {
@@ -160,6 +164,7 @@ Describe 'New-CompleteOperationsQuery' {
         $result | Should -Match 'SET Status = NULL'
         $result | Should -Match 'WHERE Status = 0'
         $result | Should -Match 'ToProcess <> Processed'
+        $result | Should -Match 'ProcessedIteration = NULL'
     }
 
     It 'Marks fully processed operations as complete' {
@@ -366,8 +371,38 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             -MaxBatchSize -1 `
             -FullSearch $false
 
-        $result | Should -Match 'WITH SourceRecords AS'
+        $result | Should -Match 'SourceRecords AS'
+        $result | Should -Match 'SourceRecordCandidates AS'
         $result | Should -Match 'NewRecords AS'
+    }
+
+    It 'Scopes source records to the selected in-progress operation batch' {
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::Include) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{} `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize 100 `
+            -FullSearch $false
+
+        $result | Should -Match 'ROW_NUMBER\(\) OVER'
+        $result | Should -Match 'o\.\[Table\] = 1'
+        $result | Should -Match 'o\.\[State\] = src\.\[State\]'
+        $result | Should -Match 'o\.Depth = src\.Depth'
+        $result | Should -Match 'o\.FoundIteration = src\.Iteration'
+        $result | Should -Match 'o\.\[Source\] = src\.\[Source\]'
+        $result | Should -Match 'o\.\[Fk\] = src\.\[Fk\]'
+        $result | Should -Match 'src\.BatchRowNumber > ISNULL\(o\.ProcessedIteration, 0\)'
+        $result | Should -Match 'src\.BatchRowNumber <= o\.Processed'
     }
 
     It 'Includes INSERT INTO statement' {
@@ -495,7 +530,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
                 -FullSearch $false
 
             # Should have Key0 in SourceRecords
-            $result | Should -Match 'SELECT Key0, Depth, Fk'
+            $result | Should -Match 'SELECT src\.Key0, src\.Depth, src\.Fk'
             # Should NOT have hardcoded Key1, Key2, etc.
             $result | Should -Not -Match 'Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7'
         }
@@ -520,7 +555,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
 
             # For outgoing, source columns = PK (3 columns), target columns = FK columns (2 columns)
             # SourceRecords should have Key0, Key1, Key2
-            $result | Should -Match 'SELECT Key0, Key1, Key2, Depth, Fk'
+            $result | Should -Match 'SELECT src\.Key0, src\.Key1, src\.Key2, src\.Depth, src\.Fk'
         }
 
         It 'Generates correct INSERT column list for single key' {
@@ -610,7 +645,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
 
             # For incoming: source columns = FK columns (2), target columns = target PK (2)
             # SourceRecords should have Key0, Key1
-            $result | Should -Match 'SELECT Key0, Key1, Depth, Fk'
+            $result | Should -Match 'SELECT src\.Key0, src\.Key1, src\.Depth, src\.Fk'
         }
     }
 }
