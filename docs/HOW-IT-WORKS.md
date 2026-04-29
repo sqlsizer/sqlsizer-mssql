@@ -18,14 +18,15 @@
 10. [Data Structures](#data-structures)
 11. [Session Management](#session-management)
 12. [Checkpoint & Resume](#checkpoint--resume)
-13. [Advanced Features](#advanced-features)
-14. [Common Scenarios](#common-scenarios)
-15. [Workflow Examples](#workflow-examples)
-16. [Copy-Database](#copy-database)
-17. [Azure SQL Support](#azure-sql-support)
-18. [Performance Considerations](#performance-considerations)
-19. [Troubleshooting](#troubleshooting)
-20. [Glossary](#glossary)
+13. [Subset Impact Reports](#subset-impact-reports)
+14. [Advanced Features](#advanced-features)
+15. [Common Scenarios](#common-scenarios)
+16. [Workflow Examples](#workflow-examples)
+17. [Copy-Database](#copy-database)
+18. [Azure SQL Support](#azure-sql-support)
+19. [Performance Considerations](#performance-considerations)
+20. [Troubleshooting](#troubleshooting)
+21. [Glossary](#glossary)
 
 ---
 
@@ -365,6 +366,8 @@ SqlSizer-MSSQL/
 │   ├── Find-RemovalSubset.ps1    # Deletion dependency finder
 │   ├── Initialize-StartSet.ps1   # Seed record setup
 │   ├── Get-SubsetTables.ps1      # Result retrieval
+│   ├── Get-SubsetImpactReport.ps1     # Read-only session impact report
+│   ├── Export-SubsetImpactReport.ps1  # JSON/Markdown/HTML report export
 │   ├── Copy-DataFromSubset.ps1   # Data export
 │   ├── Copy-Database.ps1         # Full database clone (backup/restore)
 │   ├── Install-SqlSizerCore.ps1  # Schema installation
@@ -374,6 +377,7 @@ SqlSizer-MSSQL/
 ├── Shared/                   # Internal helper modules
 │   ├── QueryBuilders.ps1         # CTE-based SQL query generation
 │   ├── TraversalHelpers.ps1      # State transition & constraint logic
+│   ├── SubsetImpactReportHelpers.ps1  # Report shaping and rendering helpers
 │   └── ValidationHelpers.ps1     # Input validation functions
 └── Types/                    # Type definitions
     └── SqlSizer-MSSQL-Types.ps1  # Classes, enums, and data structures
@@ -433,6 +437,8 @@ SqlSizer-MSSQL/
 │  │                                                                  │   │
 │  │  Get-SubsetTables ─────► List of tables with row counts         │   │
 │  │  Get-SubsetTableRows ──► Actual row data                        │   │
+│  │  Get-SubsetImpactReport ► Table impact + relationship summary   │   │
+│  │  Export-SubsetImpactReport ► JSON/Markdown/HTML report files    │   │
 │  │  Copy-DataFromSubset ──► Export to target database              │   │
 │  │  Get-SubsetTableJson ──► Export as JSON                         │   │
 │  │  Get-SubsetTableCsv ──► Export as CSV                           │   │
@@ -1137,6 +1143,8 @@ class TraversalStatistics {
 │  │ 4. Result Operations                                            │   │
 │  │    • Get-SubsetTables → List tables with row counts             │   │
 │  │    • Get-SubsetTableRows → Retrieve actual data                 │   │
+│  │    • Get-SubsetImpactReport → Review impact and traversal state │   │
+│  │    • Export-SubsetImpactReport → Write JSON/Markdown/HTML       │   │
 │  │    • Copy-DataFromSubset → Export to another database           │   │
 │  │    • Get-SubsetTableJson/Csv → Export to files                  │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
@@ -1259,6 +1267,96 @@ Resume-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo 
 ```
 
 The critical recovery step is resetting abandoned in-progress operations: if the process crashed mid-iteration, some Operations rows may have `Status = 0` (in-progress) but weren't actually completed. These are reset to `NULL` (pending) so they'll be re-processed.
+
+---
+
+## Subset Impact Reports
+
+Subset impact reports are read-only summaries of an existing SqlSizer session. They are designed for review before a potentially expensive or destructive next step such as copying data to a new database, deleting records, or exporting files.
+
+### What the Report Contains
+
+`Get-SubsetImpactReport` returns a PowerShell object with five top-level sections:
+
+| Section | Contents |
+|---------|----------|
+| `Summary` | Database, session id, generated time, table count, total subset rows, estimated data KB, relationship counts, operation completion flag |
+| `Tables` | One row per included table with subset rows, source rows, percent of source, primary key size, historic/deletable flags, estimated data KB |
+| `Relationships` | Reached, unreached, and all foreign key relationships for the session |
+| `Operations` | Traversal progress from `SqlSizer.Operations`, including processed/remaining records and state/depth breakdown |
+| `Warnings` | Non-fatal issues such as missing measured table statistics or unfinished traversal work |
+
+The report intentionally does not include row samples or full row data.
+
+### How It Is Built
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SUBSET IMPACT REPORT                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Get-SubsetTableStatistics                                              │
+│       │                                                                 │
+│       ├─► Table impact: subset rows + PK size                           │
+│       │                                                                 │
+│  DatabaseInfo.Tables                                                    │
+│       │                                                                 │
+│       ├─► Source rows, table data KB, historic/deletable flags          │
+│       │                                                                 │
+│  SqlSizer.Operations WHERE SessionId = ...                              │
+│       │                                                                 │
+│       ├─► Traversal progress, max depth, state/depth breakdown          │
+│       │                                                                 │
+│  SqlSizer_{SessionId}.* processing tables                               │
+│       │                                                                 │
+│       └─► Distinct FK ids reached during traversal                      │
+│                                                                         │
+│  SqlSizer.ForeignKeys + SqlSizer.Tables                                 │
+│       │                                                                 │
+│       └─► Reached and unreached relationship lists                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Table size impact is estimated proportionally from measured `DatabaseInfo` table statistics:
+
+```
+EstimatedDataKB = TableDataKB * SubsetRows / SourceRows
+```
+
+If `Get-DatabaseInfo` was run without measured table sizes, row impact still works but size fields are `$null` and the report includes a warning.
+
+### Usage
+
+```powershell
+$report = Get-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn
+
+$report.Summary
+$report.Tables | Sort-Object EstimatedDataKB -Descending |
+    Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows, EstimatedDataKB
+
+$report.Relationships.Unreached |
+    Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
+```
+
+Export the same report without external dependencies:
+
+```powershell
+Export-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn `
+    -Path ".\subset-impact.json" -Format Json
+
+Export-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn `
+    -Path ".\subset-impact.md" -Format Markdown
+
+Export-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn `
+    -Path ".\subset-impact.html" -Format Html
+```
+
+`Get-SubsetUnreachableEdges` uses the same relationship analysis and returns only the unreached foreign key edges for a session.
 
 ---
 
@@ -1440,7 +1538,30 @@ foreach ($table in $tables) {
 }
 ```
 
-### Scenario 4: Long-Running Subset with Checkpointing
+### Scenario 4: Review Subset Impact Before Copy or Delete
+
+**Goal**: Explain what a session found before moving or removing data.
+
+```powershell
+# Find subset or removal subset first
+Find-Subset -Database $db -SessionId $sessionId `
+    -DatabaseInfo $info -ConnectionInfo $connection
+
+# Review the impact in PowerShell
+$report = Get-SubsetImpactReport -Database $db -SessionId $sessionId `
+    -DatabaseInfo $info -ConnectionInfo $connection
+
+$report.Summary
+$report.Tables | Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows
+$report.Relationships.Reached | Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
+
+# Write a shareable report
+Export-SubsetImpactReport -Database $db -SessionId $sessionId `
+    -DatabaseInfo $info -ConnectionInfo $connection `
+    -Path ".\subset-impact.html" -Format Html
+```
+
+### Scenario 5: Long-Running Subset with Checkpointing
 
 **Goal**: Extract a large subset that may take hours, with crash recovery.
 
@@ -1468,7 +1589,7 @@ Find-Subset -Database $db -SessionId $sessionId -DatabaseInfo $info -ConnectionI
 #     -CheckpointPath "C:\temp\na_subset.json" -Resume
 ```
 
-### Scenario 5: Subset with Configuration
+### Scenario 6: Subset with Configuration
 
 **Goal**: Extract data but exclude audit tables and limit depth on history tables.
 
@@ -1493,7 +1614,7 @@ Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
     -ConnectionInfo $conn -TraversalConfiguration $config
 ```
 
-### Scenario 6: Compare Two Subsets
+### Scenario 7: Compare Two Subsets
 
 **Goal**: Verify consistency between two subset operations.
 
@@ -1860,6 +1981,8 @@ Clear-SqlSizerSessions -Database $db -ConnectionInfo $connection
 | `Get-SubsetTableJson` | Export as JSON | JSON string |
 | `Get-SubsetTableCsv` | Export as CSV | CSV string |
 | `Get-SubsetTableXml` | Export as XML | XML string |
+| `Get-SubsetImpactReport` | Build impact report | PSObject with Summary, Tables, Relationships, Operations, Warnings |
+| `Export-SubsetImpactReport` | Export impact report | JSON, Markdown, or HTML file |
 | `Copy-DataFromSubset` | Copy to another DB | (side effect) |
 
 ### Data Operations

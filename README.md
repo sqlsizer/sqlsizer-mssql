@@ -19,6 +19,7 @@ A PowerShell module for extracting referentially-consistent data subsets from SQ
 | **CTE-based SQL** | Optimized, readable query generation |
 | **Checkpoint/resume** | Save progress and recover from crashes on long operations |
 | **Traversal configuration** | Per-table state overrides, depth limits, row caps, ignored tables |
+| **Subset impact reports** | Review table impact, progress, and reached/unreached relationships before copy/delete/export |
 | **Azure SQL support** | Token-based auth, Azure-specific operations |
 | **Session isolation** | Multiple concurrent sessions without interference |
 
@@ -28,6 +29,7 @@ A PowerShell module for extracting referentially-consistent data subsets from SQ
 |----------|--------|
 | Create test databases from production data | `Find-Subset` + `Copy-DataFromSubset` |
 | Safely delete records respecting FK constraints | `Find-RemovalSubset` + `Remove-FoundSubsetFromDatabase` |
+| Review subset impact before copy/delete/export | `Get-SubsetImpactReport` / `Export-SubsetImpactReport` |
 | Export data subsets as JSON/CSV/XML | `Get-SubsetTableJson`, `Get-SubsetTableCsv` |
 | Clone databases | `Copy-Database` |
 | Compare data across subsets | `Compare-SavedSubsets` |
@@ -55,8 +57,9 @@ $query.Top = 10
 Initialize-StartSet -Database "MyDB" -Queries @($query) -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection
 Find-Subset -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection
 
-# 4. View results
+# 4. View results and impact
 Get-SubsetTables -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection | Format-Table
+Get-SubsetImpactReport -Database "MyDB" -SessionId $sessionId -DatabaseInfo $info -ConnectionInfo $connection
 
 # 5. Cleanup
 Clear-SqlSizerSession -Database "MyDB" -SessionId $sessionId -ConnectionInfo $connection
@@ -163,6 +166,35 @@ Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $c
 Resume-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
     -CheckpointPath "C:\temp\checkpoint.json"
 ```
+
+---
+
+## Subset Impact Reports
+
+Before copying, deleting, or exporting data, generate a read-only report that explains what the current session found:
+
+```powershell
+$report = Get-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn
+
+$report.Summary
+$report.Tables | Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows
+$report.Relationships.Reached | Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
+```
+
+Export the same report for review or audit:
+
+```powershell
+Export-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn `
+    -Path ".\subset-impact.html" -Format Html
+
+Export-SubsetImpactReport -Database $db -SessionId $sid `
+    -DatabaseInfo $info -ConnectionInfo $conn `
+    -Path ".\subset-impact.md" -Format Markdown
+```
+
+The report includes table row counts, percent of source rows, estimated data KB when `DatabaseInfo` has measured table statistics, traversal operation progress, and reached/unreached foreign key relationships. It does not include row samples or full row data.
 
 ---
 
