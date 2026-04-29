@@ -248,6 +248,13 @@ Import-Module SqlSizer-MSSQL
 | `Copy-DataFromSubset` | Copy subset to another database |
 | `Copy-Database` | Clone database via backup/restore |
 
+### Reporting & Analysis
+
+| Cmdlet | Purpose |
+|--------|---------|
+| `Get-SubsetImpactReport` | Return a scriptable report with table impact, traversal progress, and reached/unreached FK relationships |
+| `Export-SubsetImpactReport` | Write the subset impact report as JSON, Markdown, or HTML |
+
 ### Checkpoint & Resume
 
 | Cmdlet | Purpose |

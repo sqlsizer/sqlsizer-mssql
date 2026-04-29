@@ -192,6 +192,95 @@ Describe 'Basic FK Traversal' {
 }
 
 # =====================================================
+# Subset Impact Report Tests
+# =====================================================
+
+Describe 'Subset Impact Report' {
+    AfterEach {
+        if ($testResult -and $testResult.SessionId) {
+            Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+
+        if ($reportDir -and (Test-Path -Path $reportDir)) {
+            Remove-Item -LiteralPath $reportDir -Recurse -Force
+        }
+    }
+
+    It 'Should report table impact, relationships, and write export files' {
+        $reportDir = Join-Path ([System.IO.Path]::GetTempPath()) "SqlSizerImpactReport_$([Guid]::NewGuid().ToString('N'))"
+        $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
+
+        $testResult = Invoke-FindSubsetTest `
+            -Database $script:TestDatabase `
+            -ConnectionInfo $script:Connection `
+            -DatabaseInfo $script:DbInfo `
+            -Queries @($query)
+
+        $testResult.Success | Should -Be $true
+
+        $report = Get-SubsetImpactReport `
+            -SessionId $testResult.SessionId `
+            -Database $script:TestDatabase `
+            -DatabaseInfo $script:DbInfo `
+            -ConnectionInfo $script:Connection
+
+        $expectedTableCount = $testResult.Summary.Keys.Count
+        $expectedTotalRows = Get-TotalSubsetRows -SubsetSummary $testResult.Summary
+
+        $report.Summary.TableCount | Should -Be $expectedTableCount
+        $report.Summary.TotalRows | Should -Be $expectedTotalRows
+        $report.Tables.Count | Should -Be $expectedTableCount
+        $report.Relationships.Reached.Count | Should -BeGreaterThan 0
+        $report.Relationships.Unreached.Count | Should -BeGreaterThan 0
+        $report.Relationships.Reached[0].PSObject.Properties.Name | Should -Contain 'FromSchema'
+        $report.Relationships.Reached[0].PSObject.Properties.Name | Should -Contain 'ToSchema'
+        $report.Operations.Summary.TotalOperations | Should -BeGreaterThan 0
+
+        $unreachableEdges = Get-SubsetUnreachableEdges `
+            -SessionId $testResult.SessionId `
+            -Database $script:TestDatabase `
+            -DatabaseInfo $script:DbInfo `
+            -ConnectionInfo $script:Connection
+
+        $unreachableEdges.Count | Should -Be $report.Relationships.Unreached.Count
+
+        $jsonFile = Export-SubsetImpactReport `
+            -SessionId $testResult.SessionId `
+            -Database $script:TestDatabase `
+            -DatabaseInfo $script:DbInfo `
+            -ConnectionInfo $script:Connection `
+            -Path (Join-Path $reportDir 'report.json') `
+            -Format Json
+
+        $markdownFile = Export-SubsetImpactReport `
+            -SessionId $testResult.SessionId `
+            -Database $script:TestDatabase `
+            -DatabaseInfo $script:DbInfo `
+            -ConnectionInfo $script:Connection `
+            -Path (Join-Path $reportDir 'report.md') `
+            -Format Markdown
+
+        $htmlFile = Export-SubsetImpactReport `
+            -SessionId $testResult.SessionId `
+            -Database $script:TestDatabase `
+            -DatabaseInfo $script:DbInfo `
+            -ConnectionInfo $script:Connection `
+            -Path (Join-Path $reportDir 'report.html') `
+            -Format Html
+
+        Test-Path -Path $jsonFile.FullName | Should -Be $true
+        Test-Path -Path $markdownFile.FullName | Should -Be $true
+        Test-Path -Path $htmlFile.FullName | Should -Be $true
+
+        $json = Get-Content -Path $jsonFile.FullName -Raw | ConvertFrom-Json
+        $json.Summary.TableCount | Should -Be $expectedTableCount
+
+        Get-Content -Path $markdownFile.FullName -Raw | Should -Match '# SqlSizer Subset Impact Report'
+        Get-Content -Path $htmlFile.FullName -Raw | Should -Match '<!doctype html>'
+    }
+}
+
+# =====================================================
 # Complex Graph Pattern Tests
 # =====================================================
 

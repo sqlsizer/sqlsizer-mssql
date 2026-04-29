@@ -4,6 +4,9 @@ function Get-SubsetUnreachableEdges
     param
     (
         [Parameter(Mandatory = $true)]
+        [string]$SessionId,
+
+        [Parameter(Mandatory = $true)]
         [string]$Database,
 
         [Parameter(Mandatory = $true)]
@@ -13,53 +16,23 @@ function Get-SubsetUnreachableEdges
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    $structure = [Structure]::new($DatabaseInfo)
+    $impact = Get-SubsetRelationshipImpact `
+        -SessionId $SessionId `
+        -Database $Database `
+        -DatabaseInfo $DatabaseInfo `
+        -ConnectionInfo $ConnectionInfo
 
-    $reachedEdges = New-Object 'System.Collections.Generic.HashSet[int]'
-    $allEdges = New-Object 'System.Collections.Generic.HashSet[int]'
-
-    $tmp = "SELECT DISTINCT [Id] FROM SqlSizer.ForeignKeys"
-    $results = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
-
-    foreach ($row in $results)
+    if ($impact.Unreached.Count -gt 0)
     {
-        $null = $allEdges.Add($row.Id)
-    }
-
-    foreach ($signature in $structure.Signatures.Keys)
-    {
-        $processing = $structure.GetProcessingName($signature, $SessionId)
-
-        $tmp = "SELECT DISTINCT [Fk] FROM $($processing) WHERE [FK] IS NOT NULL"
-        $results = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
-
-        foreach ($row in $results)
-        {
-            $null = $reachedEdges.Add($row.Fk)
-        }
-    }
-
-    $allEdges.ExceptWith($reachedEdges)
-    if ($allEdges.Count -gt 0)
-    {
-        $ids = ""
-        foreach ($id in $allEdges)
-        {
-            if ($ids -ne "")
-            {
-                $ids += ","
+        return $impact.Unreached | ForEach-Object {
+            [pscustomobject]@{
+                Name     = $_.Name
+                FkSchema = $_.FromSchema
+                FkTable  = $_.FromTable
+                Schema   = $_.ToSchema
+                TableName = $_.ToTable
             }
-            $ids += (" " + $id)
         }
-
-        $tmp = "SELECT f.[Name], t.[Schema] as FkSchema, t.[TableName] as FkTable, t2.[Schema], t2.[TableName]
-                FROM SqlSizer.ForeignKeys f
-                INNER JOIN SqlSizer.Tables t ON t.Id = f.FkTableId
-                INNER JOIN SqlSizer.Tables t2 ON t2.Id = f.TableId
-                WHERE f.[Id] IN ($($ids))"
-        $results = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
-
-        return $results
     }
 
     return $null

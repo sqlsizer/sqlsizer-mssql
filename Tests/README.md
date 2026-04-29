@@ -91,6 +91,11 @@ Invoke-Pester -Configuration $config
   - `New-ExcludePendingQuery` - Pending exclusion (marks bookkeeping Pending as Exclude)
   - `New-CTETraversalQuery` - Main traversal CTE query (including Pending-to-Include promotion)
 
+- **SubsetImpactReport.Tests.ps1** - Tests for report shaping and rendering
+  - Top-level report object structure
+  - Markdown and HTML rendering
+  - JSON serialization depth
+
 - **Find-Subset.Integration.Tests.ps1** - End-to-end tests against real database
   - Basic FK traversal (single/multi-hop chains)
   - Diamond patterns (multiple FK paths to same table)
@@ -107,6 +112,7 @@ Invoke-Pester -Configuration $config
   - BFS vs DFS comparison
   - MaxBatchSize chunking
   - Interactive mode
+  - Subset impact report and JSON/Markdown/HTML exports
   - Edge cases (empty results, orphan tables, high fanout)
   - **End-to-End Database Subset Creation**
     - Creates subset from complex multi-table queries
