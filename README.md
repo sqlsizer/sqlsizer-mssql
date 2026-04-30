@@ -90,6 +90,29 @@ Subset outputs include only closure states: `Include`, `IncludeFull`, and `Inbou
 
 ---
 
+### Whole-Database Detection
+
+`Find-Subset` warns when traversal looks likely to reach too much of the source database:
+
+```powershell
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -MaxSubsetPercentOfSource 20 `
+    -MaxReachableTablePercent 80 `
+    -SubsetGuardCheckInterval 5 `
+    -ThrowOnSubsetGuardExceeded $false
+```
+
+| Guard | Default | Description |
+|-------|---------|-------------|
+| `MaxSubsetPercentOfSource` | `20` | Runtime warning when included subset rows exceed this percentage of PK-bearing source rows. Use `0` to disable. |
+| `MaxReachableTablePercent` | `80` | Preflight warning when metadata traversal can reach this percentage of PK-bearing user tables. Use `0` to disable. |
+| `SubsetGuardCheckInterval` | `5` | Runtime guard check frequency in traversal iterations. |
+| `ThrowOnSubsetGuardExceeded` | `$false` | Throw a terminating error instead of warning when the runtime row-ratio guard is exceeded. |
+
+The guard is warn-only by default. Results include a `SubsetSizeGuard` object with preflight and runtime summaries.
+
+---
+
 ## Traversal Configuration
 
 Customize behavior per table with `TraversalConfiguration`:

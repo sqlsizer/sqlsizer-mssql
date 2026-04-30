@@ -287,7 +287,19 @@ function Invoke-FindSubsetTest {
         [TraversalConfiguration]$TraversalConfiguration = $null,
         
         [Parameter(Mandatory = $false)]
-        [int]$MaxBatchSize = -1
+        [int]$MaxBatchSize = -1,
+
+        [Parameter(Mandatory = $false)]
+        [double]$MaxSubsetPercentOfSource = 20.0,
+
+        [Parameter(Mandatory = $false)]
+        [double]$MaxReachableTablePercent = 80.0,
+
+        [Parameter(Mandatory = $false)]
+        [int]$SubsetGuardCheckInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$ThrowOnSubsetGuardExceeded = $false
     )
     
     # Create session
@@ -313,6 +325,10 @@ function Invoke-FindSubsetTest {
             SessionId      = $sessionId
             FullSearch     = $FullSearch
             UseDfs         = $UseDfs
+            MaxSubsetPercentOfSource = $MaxSubsetPercentOfSource
+            MaxReachableTablePercent = $MaxReachableTablePercent
+            SubsetGuardCheckInterval = $SubsetGuardCheckInterval
+            ThrowOnSubsetGuardExceeded = $ThrowOnSubsetGuardExceeded
         }
         
         if ($null -ne $IgnoredTables) {

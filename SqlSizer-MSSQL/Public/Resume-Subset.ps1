@@ -29,6 +29,20 @@
 .PARAMETER CheckpointInterval
     How often (in iterations) to save a checkpoint during the resumed run. Default: 5.
 
+.PARAMETER MaxSubsetPercentOfSource
+    Warn when included subset rows exceed this percentage of PK-bearing source rows.
+    Default: 20. Set to 0 to disable row-ratio warnings.
+
+.PARAMETER MaxReachableTablePercent
+    Warn before traversal when metadata reachability can cover more than this percentage
+    of PK-bearing user tables. Default: 80. Set to 0 to disable preflight warnings.
+
+.PARAMETER SubsetGuardCheckInterval
+    How often (in traversal iterations) to check the runtime subset-size guard. Default: 5.
+
+.PARAMETER ThrowOnSubsetGuardExceeded
+    Throw a terminating error when the runtime subset-size guard is exceeded. Default: false.
+
 .EXAMPLE
     # Resume a crashed traversal
     $info = Get-DatabaseInfo -Database "MyDB" -ConnectionInfo $conn
@@ -62,7 +76,19 @@ function Resume-Subset
         [TraversalConfiguration]$TraversalConfiguration = $null,
 
         [Parameter(Mandatory = $false)]
-        [int]$CheckpointInterval = 5
+        [int]$CheckpointInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [double]$MaxSubsetPercentOfSource = 20.0,
+
+        [Parameter(Mandatory = $false)]
+        [double]$MaxReachableTablePercent = 80.0,
+
+        [Parameter(Mandatory = $false)]
+        [int]$SubsetGuardCheckInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$ThrowOnSubsetGuardExceeded = $false
     )
 
     if (-not (Test-Path $CheckpointPath))
@@ -84,7 +110,25 @@ function Resume-Subset
             Finished            = $true
             Initialized         = $true
             CompletedIterations = 0
+            SubsetSizeGuard     = $null
         }
+    }
+
+    if ((-not $PSBoundParameters.ContainsKey('MaxSubsetPercentOfSource')) -and $checkpoint.PSObject.Properties['MaxSubsetPercentOfSource'])
+    {
+        $MaxSubsetPercentOfSource = [double]$checkpoint.MaxSubsetPercentOfSource
+    }
+    if ((-not $PSBoundParameters.ContainsKey('MaxReachableTablePercent')) -and $checkpoint.PSObject.Properties['MaxReachableTablePercent'])
+    {
+        $MaxReachableTablePercent = [double]$checkpoint.MaxReachableTablePercent
+    }
+    if ((-not $PSBoundParameters.ContainsKey('SubsetGuardCheckInterval')) -and $checkpoint.PSObject.Properties['SubsetGuardCheckInterval'])
+    {
+        $SubsetGuardCheckInterval = [int]$checkpoint.SubsetGuardCheckInterval
+    }
+    if ((-not $PSBoundParameters.ContainsKey('ThrowOnSubsetGuardExceeded')) -and $checkpoint.PSObject.Properties['ThrowOnSubsetGuardExceeded'])
+    {
+        $ThrowOnSubsetGuardExceeded = [bool]$checkpoint.ThrowOnSubsetGuardExceeded
     }
 
     $params = @{
@@ -97,6 +141,10 @@ function Resume-Subset
         FullSearch         = [bool]$checkpoint.FullSearch
         UseDfs             = [bool]$checkpoint.UseDfs
         MaxBatchSize       = [int]$checkpoint.MaxBatchSize
+        MaxSubsetPercentOfSource = $MaxSubsetPercentOfSource
+        MaxReachableTablePercent = $MaxReachableTablePercent
+        SubsetGuardCheckInterval = $SubsetGuardCheckInterval
+        ThrowOnSubsetGuardExceeded = $ThrowOnSubsetGuardExceeded
         Resume             = $true
     }
 

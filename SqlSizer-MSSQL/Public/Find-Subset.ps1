@@ -28,6 +28,20 @@
     to point to an existing checkpoint file. Skips Initialize-OperationsTable and recovers
     the iteration counter from the checkpoint.
 
+.PARAMETER MaxSubsetPercentOfSource
+    Warn when included subset rows exceed this percentage of PK-bearing source rows.
+    Default: 20. Set to 0 to disable row-ratio warnings.
+
+.PARAMETER MaxReachableTablePercent
+    Warn before traversal when metadata reachability can cover more than this percentage
+    of PK-bearing user tables. Default: 80. Set to 0 to disable preflight warnings.
+
+.PARAMETER SubsetGuardCheckInterval
+    How often (in traversal iterations) to check the runtime subset-size guard. Default: 5.
+
+.PARAMETER ThrowOnSubsetGuardExceeded
+    Throw a terminating error when the runtime subset-size guard is exceeded. Default: false.
+
 .NOTES
     Initialize the start set using Initialize-StartSet before calling this function.
     For long-running traversals, use -CheckpointPath to enable automatic progress saving.
@@ -93,8 +107,35 @@ function Find-Subset
         [int]$CheckpointInterval = 5,
 
         [Parameter(Mandatory = $false)]
+        [double]$MaxSubsetPercentOfSource = 20.0,
+
+        [Parameter(Mandatory = $false)]
+        [double]$MaxReachableTablePercent = 80.0,
+
+        [Parameter(Mandatory = $false)]
+        [int]$SubsetGuardCheckInterval = 5,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$ThrowOnSubsetGuardExceeded = $false,
+
+        [Parameter(Mandatory = $false)]
         [switch]$Resume
     )
+
+    if ($MaxSubsetPercentOfSource -lt 0)
+    {
+        throw "MaxSubsetPercentOfSource must be greater than or equal to 0."
+    }
+
+    if ($MaxReachableTablePercent -lt 0)
+    {
+        throw "MaxReachableTablePercent must be greater than or equal to 0."
+    }
+
+    if ($SubsetGuardCheckInterval -lt 1)
+    {
+        throw "SubsetGuardCheckInterval must be greater than or equal to 1."
+    }
 
     # O(1) table lookup hashtable - built at initialization
     $tablesByFullName = @{}
@@ -469,6 +510,9 @@ function Find-Subset
     $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
     $tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
     $fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
+    $subsetGuardPreflight = $null
+    $subsetGuardRuntime = $null
+    $subsetGuardRuntimeWarningRaised = $false
 
     if ($Interactive -eq $false)
     {
@@ -496,11 +540,29 @@ function Find-Subset
                     Finished            = $true
                     Initialized         = $true
                     CompletedIterations = 0
+                    SubsetSizeGuard     = $null
                 }
             }
             if ($checkpoint.SessionId -ne $SessionId)
             {
                 throw "SessionId mismatch. Checkpoint is for session '$($checkpoint.SessionId)', but '$SessionId' was provided."
+            }
+
+            if ((-not $PSBoundParameters.ContainsKey('MaxSubsetPercentOfSource')) -and $checkpoint.PSObject.Properties['MaxSubsetPercentOfSource'])
+            {
+                $MaxSubsetPercentOfSource = [double]$checkpoint.MaxSubsetPercentOfSource
+            }
+            if ((-not $PSBoundParameters.ContainsKey('MaxReachableTablePercent')) -and $checkpoint.PSObject.Properties['MaxReachableTablePercent'])
+            {
+                $MaxReachableTablePercent = [double]$checkpoint.MaxReachableTablePercent
+            }
+            if ((-not $PSBoundParameters.ContainsKey('SubsetGuardCheckInterval')) -and $checkpoint.PSObject.Properties['SubsetGuardCheckInterval'])
+            {
+                $SubsetGuardCheckInterval = [int]$checkpoint.SubsetGuardCheckInterval
+            }
+            if ((-not $PSBoundParameters.ContainsKey('ThrowOnSubsetGuardExceeded')) -and $checkpoint.PSObject.Properties['ThrowOnSubsetGuardExceeded'])
+            {
+                $ThrowOnSubsetGuardExceeded = [bool]$checkpoint.ThrowOnSubsetGuardExceeded
             }
 
             $StartIteration = $checkpoint.LastCompletedIteration
@@ -518,6 +580,18 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         }
         else
         {
+            $subsetGuardPreflight = Invoke-SubsetGuardPreflight `
+                -SessionId $SessionId `
+                -Database $Database `
+                -DatabaseInfo $DatabaseInfo `
+                -ConnectionInfo $ConnectionInfo `
+                -Structure $structure `
+                -StartIteration $StartIteration `
+                -IgnoredTables $IgnoredTables `
+                -TraversalConfiguration $TraversalConfiguration `
+                -FullSearch $FullSearch `
+                -MaxReachableTablePercent $MaxReachableTablePercent
+
             # Normal start: initialize operations
             $null = Initialize-OperationsTable `
                 -SessionId $SessionId `
@@ -537,6 +611,10 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                     FullSearch             = $FullSearch
                     UseDfs                 = $UseDfs
                     MaxBatchSize           = $MaxBatchSize
+                    MaxSubsetPercentOfSource = $MaxSubsetPercentOfSource
+                    MaxReachableTablePercent = $MaxReachableTablePercent
+                    SubsetGuardCheckInterval = $SubsetGuardCheckInterval
+                    ThrowOnSubsetGuardExceeded = $ThrowOnSubsetGuardExceeded
                     Status                 = 'InProgress'
                     CreatedAt              = (Get-Date).ToString('o')
                     UpdatedAt              = (Get-Date).ToString('o')
@@ -571,11 +649,34 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                         FullSearch             = $FullSearch
                         UseDfs                 = $UseDfs
                         MaxBatchSize           = $MaxBatchSize
+                        MaxSubsetPercentOfSource = $MaxSubsetPercentOfSource
+                        MaxReachableTablePercent = $MaxReachableTablePercent
+                        SubsetGuardCheckInterval = $SubsetGuardCheckInterval
+                        ThrowOnSubsetGuardExceeded = $ThrowOnSubsetGuardExceeded
                         Status                 = 'InProgress'
                         CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
                         UpdatedAt              = (Get-Date).ToString('o')
                     }
                     $iterationCheckpoint | ConvertTo-Json -Depth 10 | Set-Content -Path $CheckpointPath -Encoding UTF8
+                }
+            }
+
+            if (($iteration % $SubsetGuardCheckInterval) -eq 0)
+            {
+                $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
+                    -SessionId $SessionId `
+                    -Database $Database `
+                    -DatabaseInfo $DatabaseInfo `
+                    -ConnectionInfo $ConnectionInfo `
+                    -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                    -Iteration $iteration `
+                    -Phase 'Runtime' `
+                    -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
+                    -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+
+                if ($subsetGuardRuntime.Exceeded)
+                {
+                    $subsetGuardRuntimeWarningRaised = $true
                 }
             }
 
@@ -589,6 +690,22 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             Resolve-PendingStates -Iteration $iteration
         }
 
+        $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
+            -SessionId $SessionId `
+            -Database $Database `
+            -DatabaseInfo $DatabaseInfo `
+            -ConnectionInfo $ConnectionInfo `
+            -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+            -Iteration $iteration `
+            -Phase 'Final' `
+            -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
+            -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+
+        if ($subsetGuardRuntime.Exceeded)
+        {
+            $subsetGuardRuntimeWarningRaised = $true
+        }
+
         # Write final checkpoint
         if ($CheckpointPath)
         {
@@ -600,6 +717,10 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                 FullSearch             = $FullSearch
                 UseDfs                 = $UseDfs
                 MaxBatchSize           = $MaxBatchSize
+                MaxSubsetPercentOfSource = $MaxSubsetPercentOfSource
+                MaxReachableTablePercent = $MaxReachableTablePercent
+                SubsetGuardCheckInterval = $SubsetGuardCheckInterval
+                ThrowOnSubsetGuardExceeded = $ThrowOnSubsetGuardExceeded
                 Status                 = 'Completed'
                 CreatedAt              = if ($Resume -and $checkpoint.CreatedAt) { $checkpoint.CreatedAt } else { $startTime.ToString('o') }
                 UpdatedAt              = (Get-Date).ToString('o')
@@ -614,6 +735,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             Finished            = $true
             Initialized         = $true
             CompletedIterations = $iteration - $StartIteration
+            SubsetSizeGuard     = New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $subsetGuardRuntime
         }
     }
     else
@@ -621,6 +743,18 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         # Interactive mode: one iteration at a time
         if ($Iteration -eq 0)
         {
+            $subsetGuardPreflight = Invoke-SubsetGuardPreflight `
+                -SessionId $SessionId `
+                -Database $Database `
+                -DatabaseInfo $DatabaseInfo `
+                -ConnectionInfo $ConnectionInfo `
+                -Structure $structure `
+                -StartIteration $StartIteration `
+                -IgnoredTables $IgnoredTables `
+                -TraversalConfiguration $TraversalConfiguration `
+                -FullSearch $FullSearch `
+                -MaxReachableTablePercent $MaxReachableTablePercent
+
             $null = Initialize-OperationsTable `
                 -SessionId $SessionId `
                 -Database $Database `
@@ -632,6 +766,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                 Finished            = $false
                 Initialized         = $true
                 CompletedIterations = 1
+                SubsetSizeGuard     = New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $null
             }
         }
         else
@@ -646,10 +781,25 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                 Resolve-PendingStates -Iteration $Iteration
             }
 
+            if (-not $hasMoreWork)
+            {
+                $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
+                    -SessionId $SessionId `
+                    -Database $Database `
+                    -DatabaseInfo $DatabaseInfo `
+                    -ConnectionInfo $ConnectionInfo `
+                    -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                    -Iteration $Iteration `
+                    -Phase 'Final' `
+                    -EmitWarning $true `
+                    -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+            }
+
             return [pscustomobject]@{
                 Finished            = -not $hasMoreWork
                 Initialized         = $true
                 CompletedIterations = 1
+                SubsetSizeGuard     = $(if (-not $hasMoreWork) { New-SubsetGuardResult -Preflight $null -Runtime $subsetGuardRuntime } else { $null })
             }
         }
     }

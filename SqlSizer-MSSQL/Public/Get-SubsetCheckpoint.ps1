@@ -25,7 +25,7 @@
 
 .OUTPUTS
     PSCustomObject with properties: Type, SessionId, Database, LastCompletedIteration,
-    FullSearch, UseDfs, MaxBatchSize, Status, CreatedAt, UpdatedAt.
+    FullSearch, UseDfs, MaxBatchSize, subset guard settings, Status, CreatedAt, UpdatedAt.
     Returns $null if the file does not exist.
 #>
 

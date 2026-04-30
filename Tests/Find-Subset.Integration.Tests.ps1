@@ -767,6 +767,82 @@ Describe 'FullSearch Mode' {
 }
 
 # =====================================================
+# Subset Size Guard Tests
+# =====================================================
+
+Describe 'Subset Size Guard' {
+    AfterEach {
+        if ($testResult -and $testResult.SessionId) {
+            Remove-TestSession -SessionId $testResult.SessionId -Database $script:TestDatabase -DatabaseInfo $script:DbInfo -ConnectionInfo $script:Connection
+        }
+    }
+
+    It 'Should not flag a small dependency subset as whole database' {
+        $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
+
+        $testResult = Invoke-FindSubsetTest `
+            -Database $script:TestDatabase `
+            -ConnectionInfo $script:Connection `
+            -DatabaseInfo $script:DbInfo `
+            -Queries @($query) `
+            -FullSearch $false `
+            -MaxSubsetPercentOfSource 20 `
+            -SubsetGuardCheckInterval 1
+
+        $testResult.Success | Should -Be $true
+        $testResult.Result.SubsetSizeGuard | Should -Not -BeNullOrEmpty
+        $testResult.Result.SubsetSizeGuard.Runtime.Exceeded | Should -Be $false
+        $testResult.Result.SubsetSizeGuard.Runtime.SubsetRows | Should -BeLessThan $testResult.Result.SubsetSizeGuard.Runtime.SourceRows
+    }
+
+    It 'Should flag an intentionally broad all-table seed as whole database' {
+        $queries = @()
+        foreach ($table in $script:DbInfo.Tables) {
+            if (($table.PrimaryKey.Count -eq 0) -or $table.SchemaName.StartsWith('SqlSizer')) {
+                continue
+            }
+
+            $queries += New-TestQuery `
+                -Schema $table.SchemaName `
+                -Table $table.TableName `
+                -KeyColumns @($table.PrimaryKey | ForEach-Object { $_.Name })
+        }
+
+        $testResult = Invoke-FindSubsetTest `
+            -Database $script:TestDatabase `
+            -ConnectionInfo $script:Connection `
+            -DatabaseInfo $script:DbInfo `
+            -Queries $queries `
+            -FullSearch $false `
+            -MaxSubsetPercentOfSource 20 `
+            -MaxReachableTablePercent 0 `
+            -SubsetGuardCheckInterval 1
+
+        $testResult.Success | Should -Be $true
+        $testResult.Result.SubsetSizeGuard.Runtime.Exceeded | Should -Be $true
+        $testResult.Result.SubsetSizeGuard.Runtime.PercentOfSourceRows | Should -BeGreaterThan 20
+    }
+
+    It 'Should throw when the runtime guard is exceeded and error mode is enabled' {
+        $query = New-TestQuery -Schema 'dbo' -Table 'Products' -KeyColumns @('ProductId') -Top 1
+
+        $testResult = Invoke-FindSubsetTest `
+            -Database $script:TestDatabase `
+            -ConnectionInfo $script:Connection `
+            -DatabaseInfo $script:DbInfo `
+            -Queries @($query) `
+            -FullSearch $false `
+            -MaxSubsetPercentOfSource 0.01 `
+            -MaxReachableTablePercent 0 `
+            -SubsetGuardCheckInterval 1 `
+            -ThrowOnSubsetGuardExceeded $true
+
+        $testResult.Success | Should -Be $false
+        $testResult.Error.Exception.Message | Should -Match 'Subset size guard exceeded'
+    }
+}
+
+# =====================================================
 # IncludeFull State Tests
 # =====================================================
 
