@@ -321,7 +321,7 @@ See the [Examples/](Examples/) directory for 35+ complete working scripts:
 
 | Category | Location | Description |
 |----------|----------|-------------|
-| Subset | [Subset/](Examples/AdventureWorks2019/Subset/) | Basic to advanced subset extraction (10 examples) |
+| Subset | [Subset/](Examples/AdventureWorks2019/Subset/) | Basic to advanced subset extraction (11 examples) |
 | Removal | [Removal/](Examples/AdventureWorks2019/Removal/) | Safe data deletion strategies (8 examples) |
 | Schema | [Schema/](Examples/AdventureWorks2019/Schema/) | Database schema operations |
 | JSON | [JSON/](Examples/AdventureWorks2019/JSON/) | Import/export JSON data and schemas |
