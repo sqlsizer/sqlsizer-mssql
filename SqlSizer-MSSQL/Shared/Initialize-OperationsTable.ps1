@@ -16,30 +16,33 @@ function Initialize-OperationsTable
         [DatabaseInfo]$DatabaseInfo,
 
         [Parameter(Mandatory = $true)]
-        [SqlConnectionInfo]$ConnectionInfo
+        [SqlConnectionInfo]$ConnectionInfo,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$Statistics = $true
     )
 
     # load meta data
     $structure = [Structure]::new($DatabaseInfo)
-    $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
+    $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
     $allTablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
 
     # initialize operations
-    foreach ($table in $DatabaseInfo.Tables)
-    {
-        if ($table.PrimaryKey.Count -eq 0)
-        {
-            continue
-        }
-        if ($table.SchemaName -in @('SqlSizer', 'SqlSizerHistory'))
-        {
-            continue
-        }
+    $tables = @($DatabaseInfo.Tables | Where-Object {
+        ($_.PrimaryKey.Count -gt 0) -and
+        ($_.SchemaName -notin @('SqlSizer', 'SqlSizerHistory')) -and
+        (-not $_.SchemaName.StartsWith('SqlSizer'))
+    })
 
-        if ($table.SchemaName.StartsWith('SqlSizer'))
-        {
-            continue
-        }
+    $tableIndex = 0
+    foreach ($table in $tables)
+    {
+        $tableIndex++
+        Write-Progress -Activity "Initializing traversal operations $SessionId" `
+                       -Status "Counting seeded rows per table" `
+                       -CurrentOperation "$($table.SchemaName).$($table.TableName)" `
+                       -PercentComplete ([int][Math]::Round(100 * ($tableIndex / [Math]::Max(1, $tables.Count))))
+
         $signature = $structure.Tables[$table]
         $processing = $structure.GetProcessingName($signature, $SessionId)
         $sqlSizerTable = $allTablesGroupedByName[$table.SchemaName + ", " + $table.TableName]
@@ -56,7 +59,9 @@ function Initialize-OperationsTable
         FROM $($processing) p
         WHERE p.Iteration >= $StartIteration
         GROUP BY [State]"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
+        $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
     }
+
+    Write-Progress -Activity "Initializing traversal operations $SessionId" -Completed
 }
 

@@ -7,11 +7,14 @@ function Get-SqlSizerInfo
         [string]$Database,
 
         [Parameter(Mandatory = $true)]
-        [SqlConnectionInfo]$ConnectionInfo
+        [SqlConnectionInfo]$ConnectionInfo,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$Statistics = $true
     )
 
     $sql = "SELECT [Id],[Schema],[TableName] FROM [SqlSizer].[Tables]"
-    $tablesRows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
+    $tablesRows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
 
     $sql = "SELECT
         f.[Id]
@@ -22,7 +25,7 @@ function Get-SqlSizerInfo
 		,ft.[TableName]
         FROM [SqlSizer].[ForeignKeys] f
 	INNER JOIN [SqlSizer].[Tables] ft ON f.FkTableId = ft.Id"
-    $fkRows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
+    $fkRows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
 
     $tables = $tablesRows | ForEach-Object {
         [pscustomobject] @{

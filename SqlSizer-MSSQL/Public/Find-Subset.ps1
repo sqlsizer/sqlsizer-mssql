@@ -42,6 +42,13 @@
 .PARAMETER ThrowOnSubsetGuardExceeded
     Throw a terminating error when the runtime subset-size guard is exceeded. Default: false.
 
+.PARAMETER CollectSqlStatistics
+    Collect SQL Server logical-read statistics during traversal. Disabled by default because
+    STATISTICS IO adds measurable overhead to large traversal runs. Enable when profiling.
+
+.PARAMETER ProgressRefreshInterval
+    How often (in iterations) to refresh aggregate progress statistics. Default: 5.
+
 .NOTES
     Initialize the start set using Initialize-StartSet before calling this function.
     For long-running traversals, use -CheckpointPath to enable automatic progress saving.
@@ -119,6 +126,12 @@ function Find-Subset
         [bool]$ThrowOnSubsetGuardExceeded = $false,
 
         [Parameter(Mandatory = $false)]
+        [bool]$CollectSqlStatistics = $false,
+
+        [Parameter(Mandatory = $false)]
+        [int]$ProgressRefreshInterval = 5,
+
+        [Parameter(Mandatory = $false)]
         [switch]$Resume
     )
 
@@ -135,6 +148,11 @@ function Find-Subset
     if ($SubsetGuardCheckInterval -lt 1)
     {
         throw "SubsetGuardCheckInterval must be greater than or equal to 1."
+    }
+
+    if ($ProgressRefreshInterval -lt 1)
+    {
+        throw "ProgressRefreshInterval must be greater than or equal to 1."
     }
 
     # O(1) table lookup hashtable - built at initialization
@@ -274,17 +292,7 @@ function Find-Subset
         # O(1) lookup using hashtable instead of Where-Object
         $table = $tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
 
-        $progressPercent = Get-FindSubsetProgressPercent -Statistics $progressStats
-        $progressStatus = Get-FindSubsetProgressStatus `
-            -Statistics $progressStats `
-            -Iteration $Iteration `
-            -ElapsedTime ((Get-Date) - $startTime)
-        $progressOperation = Get-FindSubsetProgressCurrentOperation -Table $table -Operation $Operation
-
-        Write-Progress -Activity "Finding subset $SessionId" `
-                       -Status $progressStatus `
-                       -CurrentOperation $progressOperation `
-                       -PercentComplete ([int][Math]::Round($progressPercent))
+        Write-FindSubsetProgress -Phase "Preparing traversal SQL" -Iteration $Iteration -Operation $Operation -Table $table
 
         # Check which directions to traverse
         $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing) -FullSearch $FullSearch
@@ -296,6 +304,7 @@ function Find-Subset
         # Build outgoing traversal query
         if ($traverseOutgoing)
         {
+            Write-FindSubsetProgress -Phase "Building outgoing traversal SQL" -Iteration $Iteration -Operation $Operation -Table $table
             $query = New-TraversalQuery `
                 -Table $table `
                 -State $Operation.State `
@@ -312,6 +321,7 @@ function Find-Subset
         # Build incoming traversal query
         if ($traverseIncoming)
         {
+            Write-FindSubsetProgress -Phase "Building incoming traversal SQL" -Iteration $Iteration -Operation $Operation -Table $table
             $query = New-TraversalQuery `
                 -Table $table `
                 -State $Operation.State `
@@ -329,7 +339,13 @@ function Find-Subset
         if ($batchedQueries.Count -gt 0)
         {
             $batchedSql = $batchedQueries -join "`n"
-            $null = Invoke-SqlcmdEx -Sql $batchedSql -Database $Database -ConnectionInfo $ConnectionInfo
+            $phase = "Executing traversal SQL ($($batchedQueries.Count) batches)"
+            $null = Invoke-FindSubsetSql -Sql $batchedSql -Phase $phase -Iteration $Iteration -Operation $Operation -Table $table
+        }
+        else
+        {
+            Write-FindSubsetProgress -Phase "No traversal SQL generated" -Iteration $Iteration -Operation $Operation -Table $table
+            Write-Verbose "No traversal SQL generated for $($table.SchemaName).$($table.TableName), state $($Operation.State), depth $($Operation.Depth)"
         }
 
         # Candidate/bookkeeping states are resolved after the closure is complete.
@@ -368,7 +384,7 @@ function Find-Subset
             $processing = $structure.GetProcessingName($signature, $SessionId)
             $query = New-ExcludePendingQuery -ProcessingTable $processing -TableInfo $table
 
-            $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+            $result = Invoke-FindSubsetSql -Sql $query -Phase "Resolving pending states: $($table.SchemaName).$($table.TableName)" -Iteration $Iteration -Table $table
             if ($null -ne $result -and $null -ne $result.ExcludedCount)
             {
                 $excludedCount += $result.ExcludedCount
@@ -386,12 +402,14 @@ function Find-Subset
         #>
         param
         (
-            [bool]$UseDfs
+            [bool]$UseDfs,
+
+            [int]$Iteration
         )
 
         $query = New-GetNextOperationQuery -SessionId $SessionId -UseDfs $UseDfs
 
-        $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+        $result = Invoke-FindSubsetSql -Sql $query -Phase "Selecting next operation" -Iteration $Iteration
 
         if ($null -eq $result)
         {
@@ -418,7 +436,9 @@ function Find-Subset
         #>
         param
         (
-            [TraversalOperation]$Operation
+            [TraversalOperation]$Operation,
+
+            [int]$Iteration
         )
 
         $state = [int]$Operation.State
@@ -429,7 +449,8 @@ function Find-Subset
             -SessionId $SessionId `
             -MaxBatchSize $MaxBatchSize
 
-        $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+        $table = $tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
+        $null = Invoke-FindSubsetSql -Sql $query -Phase "Marking operation in progress" -Iteration $Iteration -Operation $Operation -Table $table
     }
 
     function Complete-Operations
@@ -445,7 +466,7 @@ function Find-Subset
 
         $query = New-CompleteOperationsQuery -SessionId $SessionId -Iteration $Iteration
 
-        $null = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+        $null = Invoke-FindSubsetSql -Sql $query -Phase "Completing operation" -Iteration $Iteration
     }
 
     function Get-IterationStatistics
@@ -462,7 +483,7 @@ function Find-Subset
 
         $query = New-GetIterationStatisticsQuery -SessionId $SessionId
 
-        $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
+        $result = Invoke-FindSubsetSql -Sql $query -Phase "Refreshing progress statistics" -Iteration $Iteration
 
         $stats = [TraversalStatistics]::new()
         $stats.TotalOperations = ConvertTo-FindSubsetProgressLong -Value $result.TotalOperations
@@ -490,7 +511,7 @@ function Find-Subset
         )
 
         # Get next operation
-        $operation = Get-NextOperation -UseDfs $UseDfs
+        $operation = Get-NextOperation -UseDfs $UseDfs -Iteration $Iteration
 
         if ($null -eq $operation)
         {
@@ -499,7 +520,7 @@ function Find-Subset
         }
 
         # Mark as in-progress
-        Set-OperationInProgress -Operation $operation
+        Set-OperationInProgress -Operation $operation -Iteration $Iteration
 
         # Execute traversal
         Invoke-TraversalOperation -Operation $operation -Iteration $Iteration
@@ -512,11 +533,118 @@ function Find-Subset
 
     #endregion
 
+    function Write-FindSubsetProgress
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [string]$Phase,
+
+            [Parameter(Mandatory = $true)]
+            [int]$Iteration,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TraversalOperation]$Operation = $null,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TableInfo]$Table = $null,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TraversalStatistics]$Statistics = $null
+        )
+
+        $stats = $Statistics
+        if ($null -eq $stats)
+        {
+            $stats = $progressStats
+        }
+
+        $elapsed = [TimeSpan]::Zero
+        if ($null -ne $startTime)
+        {
+            $elapsed = (Get-Date) - $startTime
+        }
+
+        $progressPercent = Get-FindSubsetProgressPercent -Statistics $stats
+        $progressStatus = Get-FindSubsetProgressStatus `
+            -Statistics $stats `
+            -Iteration $Iteration `
+            -ElapsedTime $elapsed `
+            -Phase $Phase
+
+        if (($null -ne $Operation) -and ($null -ne $Table))
+        {
+            $progressOperation = Get-FindSubsetProgressCurrentOperation -Table $Table -Operation $Operation -Phase $Phase
+        }
+        else
+        {
+            $progressOperation = $Phase
+        }
+
+        Write-Progress -Activity "Finding subset $SessionId" `
+                       -Status $progressStatus `
+                       -CurrentOperation $progressOperation `
+                       -PercentComplete ([int][Math]::Round($progressPercent))
+    }
+
+    function Invoke-FindSubsetSql
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [string]$Sql,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Phase,
+
+            [Parameter(Mandatory = $true)]
+            [int]$Iteration,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TraversalOperation]$Operation = $null,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TableInfo]$Table = $null
+        )
+
+        Write-FindSubsetProgress -Phase $Phase -Iteration $Iteration -Operation $Operation -Table $Table
+
+        $beforeReads = 0
+        if ($null -ne $ConnectionInfo.Statistics)
+        {
+            $beforeReads = $ConnectionInfo.Statistics.LogicalReads
+        }
+
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        Write-Verbose ("Find-Subset SQL start: {0}; iteration {1}; sql chars {2:N0}; statistics {3}" -f $Phase, $Iteration, $Sql.Length, $CollectSqlStatistics)
+        try
+        {
+            return Invoke-SqlcmdEx -Sql $Sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $CollectSqlStatistics
+        }
+        finally
+        {
+            $watch.Stop()
+            $logicalReads = 0
+            if ($CollectSqlStatistics -and ($null -ne $ConnectionInfo.Statistics))
+            {
+                $logicalReads = $ConnectionInfo.Statistics.LogicalReads - $beforeReads
+            }
+
+            $readText = if ($CollectSqlStatistics) { "; logical reads {0:N0}" -f $logicalReads } else { "; statistics off" }
+            Write-Verbose ("Find-Subset SQL complete: {0}; iteration {1}; elapsed {2:N2}s{3}" -f $Phase, $Iteration, $watch.Elapsed.TotalSeconds, $readText)
+        }
+    }
+
     #region Main Execution
 
     # Initialize metadata
     $structure = [Structure]::new($DatabaseInfo)
-    $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo
+    $sqlSizerInfo = Get-SqlSizerInfo -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $CollectSqlStatistics
     $tablesGroupedByName = $sqlSizerInfo.Tables | Group-Object -Property SchemaName, TableName -AsHashTable -AsString
     $fkGroupedByName = $sqlSizerInfo.ForeignKeys | Group-Object -Property FkSchemaName, FkTableName, Name -AsHashTable -AsString
     $subsetGuardPreflight = $null
@@ -585,7 +713,7 @@ SET Status = NULL,
     ProcessedIteration = NULL
 WHERE Status = 0 AND SessionId = '$SessionId';
 "@
-            $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo
+            $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $CollectSqlStatistics
         }
         else
         {
@@ -607,7 +735,8 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                 -Database $Database `
                 -ConnectionInfo $ConnectionInfo `
                 -DatabaseInfo $DatabaseInfo `
-                -StartIteration $StartIteration
+                -StartIteration $StartIteration `
+                -Statistics $CollectSqlStatistics
 
             # Write initial checkpoint
             if ($CheckpointPath)
@@ -635,7 +764,6 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
         $startTime = Get-Date
         $iteration = $StartIteration + 1
-        $progressRefreshInterval = 5
         $progressStats = Get-IterationStatistics -Iteration $StartIteration -StartTime $startTime
 
         do
@@ -643,7 +771,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             $hasMoreWork = Invoke-SearchIteration -Iteration $iteration
 
             $refreshedProgressStats = $false
-            if (($iteration % $progressRefreshInterval) -eq 0)
+            if (($iteration % $ProgressRefreshInterval) -eq 0)
             {
                 $progressStats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
                 $refreshedProgressStats = $true
@@ -781,7 +909,8 @@ WHERE Status = 0 AND SessionId = '$SessionId';
                 -Database $Database `
                 -ConnectionInfo $ConnectionInfo `
                 -DatabaseInfo $DatabaseInfo `
-                -StartIteration $StartIteration
+                -StartIteration $StartIteration `
+                -Statistics $CollectSqlStatistics
 
             return [pscustomobject]@{
                 Finished            = $false
@@ -922,7 +1051,11 @@ function Get-FindSubsetProgressStatus
 
         [Parameter(Mandatory = $false)]
         [AllowNull()]
-        [TimeSpan]$ElapsedTime = [TimeSpan]::Zero
+        [TimeSpan]$ElapsedTime = [TimeSpan]::Zero,
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$Phase = ""
     )
 
     $culture = [System.Globalization.CultureInfo]::InvariantCulture
@@ -942,7 +1075,13 @@ function Get-FindSubsetProgressStatus
         $totalOperations = $Statistics.TotalOperations
     }
 
-    return "$percent% | elapsed $elapsed | records $(Format-FindSubsetProgressNumber $processed) processed / $(Format-FindSubsetProgressNumber $remaining) remaining | ops $(Format-FindSubsetProgressNumber $completedOperations)/$(Format-FindSubsetProgressNumber $totalOperations) | iteration $Iteration"
+    $phasePrefix = ""
+    if (-not [string]::IsNullOrWhiteSpace($Phase))
+    {
+        $phasePrefix = "$Phase | "
+    }
+
+    return "$phasePrefix$percent% | elapsed $elapsed | records $(Format-FindSubsetProgressNumber $processed) processed / $(Format-FindSubsetProgressNumber $remaining) remaining | ops $(Format-FindSubsetProgressNumber $completedOperations)/$(Format-FindSubsetProgressNumber $totalOperations) | iteration $Iteration"
 }
 
 function Get-FindSubsetProgressCurrentOperation
@@ -955,8 +1094,18 @@ function Get-FindSubsetProgressCurrentOperation
         [TableInfo]$Table,
 
         [Parameter(Mandatory = $true)]
-        [TraversalOperation]$Operation
+        [TraversalOperation]$Operation,
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$Phase = ""
     )
 
-    return "$($Table.SchemaName).$($Table.TableName) | state $($Operation.State) | depth $($Operation.Depth) | operation records $(Format-FindSubsetProgressNumber $Operation.RecordsToProcess)"
+    $operationText = "$($Table.SchemaName).$($Table.TableName) | state $($Operation.State) | depth $($Operation.Depth) | operation records $(Format-FindSubsetProgressNumber $Operation.RecordsToProcess)"
+    if ([string]::IsNullOrWhiteSpace($Phase))
+    {
+        return $operationText
+    }
+
+    return "$Phase | $operationText"
 }

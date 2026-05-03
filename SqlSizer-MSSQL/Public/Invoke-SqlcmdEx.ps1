@@ -30,7 +30,6 @@ function Invoke-SqlcmdEx
             ServerInstance    = $ConnectionInfo.Server
             Database          = $Database
             QueryTimeout      = 65535
-            Verbose           = $true
         }
 
         # Detect SqlServer module v22+ vs legacy SQLPS module
@@ -67,6 +66,7 @@ function Invoke-SqlcmdEx
 
         if ($true -eq $Statistics)
         {
+            $params.Verbose = $true
             $params.Query = 'SET STATISTICS IO ON
             ' + $Sql + '
             SET STATISTICS IO OFF'
