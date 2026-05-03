@@ -297,6 +297,7 @@ Available constraints:
 | `Top` | `-1` (unlimited) | Limit discovered rows to N, ordered by target primary key for repeatability |
 | `SourceSchemaName` + `SourceTableName` | `""` (any) | Only process when source matches |
 | `ForeignKeyName` | `""` (any) | Only process via this specific FK |
+| `Filter` | `""` (any) | Apply the rule only to matching target rows; use `[$table]` as the target alias |
 
 ### Fluent API
 
@@ -305,6 +306,19 @@ Available constraints:
 ```powershell
 $rule = [TraversalRule]::new("Sales", "OrderHistory")
 $rule.SetStateOverride([TraversalState]::Include).SetMaxDepth(3).SetTop(1000)
+```
+
+Rules for the same table are evaluated in `AddRule` order. A filtered rule handles
+matching target rows first; a later unfiltered rule acts as the fallback:
+
+```powershell
+$vip = [TraversalRule]::new("dbo", "Accounts")
+$vip.SetFilter("[`$table].[Tier] = 'VIP'").SetStateOverride([TraversalState]::IncludeFull)
+$config.AddRule($vip)
+
+$rest = [TraversalRule]::new("dbo", "Accounts")
+$rest.SetStateOverride([TraversalState]::Include)
+$config.AddRule($rest)
 ```
 
 ### Ignored Tables
@@ -1076,11 +1090,13 @@ class TraversalRule {
     [string]$TableName
     [StateOverride]$StateOverride      # Force a specific TraversalState
     [TraversalConstraints]$Constraints  # MaxDepth, Top, filters
+    [string]$Filter                     # Target-row SQL predicate using [$table]
 
     # Fluent methods:
     # SetStateOverride($state) → self
     # SetMaxDepth($value) → self
     # SetTop($value) → self
+    # SetFilter($filter) → self
     # SetSourceFilter($schema, $table) → self
     # SetForeignKeyFilter($fkName) → self
 }

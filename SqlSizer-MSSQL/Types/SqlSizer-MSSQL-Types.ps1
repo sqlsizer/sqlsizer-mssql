@@ -391,7 +391,11 @@ class TraversalConfiguration
             foreach ($rule in $this.Rules)
             {
                 $key = "$($rule.SchemaName), $($rule.TableName)"
-                $this._ruleCache[$key] = $rule
+                if (-not $this._ruleCache.ContainsKey($key))
+                {
+                    $this._ruleCache[$key] = @()
+                }
+                $this._ruleCache[$key] = @($this._ruleCache[$key]) + @($rule)
             }
         }
     }
@@ -400,7 +404,22 @@ class TraversalConfiguration
     {
         $this.EnsureCache()
         $key = "$schema, $table"
-        return $this._ruleCache[$key]
+        if (-not $this._ruleCache.ContainsKey($key))
+        {
+            return $null
+        }
+        return @($this._ruleCache[$key])[0]
+    }
+
+    [TraversalRule[]] GetItemsForTable([string]$schema, [string]$table)
+    {
+        $this.EnsureCache()
+        $key = "$schema, $table"
+        if (-not $this._ruleCache.ContainsKey($key))
+        {
+            return @()
+        }
+        return [TraversalRule[]]@($this._ruleCache[$key])
     }
     
     # Convenience methods for managing ignored tables
@@ -437,6 +456,7 @@ class TraversalConfiguration
     [TraversalConfiguration] AddRule([TraversalRule]$rule)
     {
         $this.Rules += $rule
+        $this._ruleCache = $null
         return $this
     }
 }
@@ -458,6 +478,7 @@ class TraversalRule
     [string]$TableName
     [StateOverride]$StateOverride
     [TraversalConstraints]$Constraints
+    [string]$Filter
     
     # Convenience properties for backward compatibility
     hidden [TraversalState]$_forcedState = [TraversalState]::Include
@@ -469,6 +490,7 @@ class TraversalRule
         $this.TableName = ""
         $this.StateOverride = $null
         $this.Constraints = $null
+        $this.Filter = ""
     }
     
     TraversalRule([string]$schema, [string]$table)
@@ -477,6 +499,7 @@ class TraversalRule
         $this.TableName = $table
         $this.StateOverride = $null
         $this.Constraints = $null
+        $this.Filter = ""
     }
     
     # Convenience property: ForcedState (returns StateOverride.State or default)
@@ -534,6 +557,19 @@ class TraversalRule
             $this.Constraints = New-Object TraversalConstraints
         }
         $this.Constraints.ForeignKeyName = $fkName
+        return $this
+    }
+
+    [TraversalRule] SetFilter([string]$filter)
+    {
+        if ($null -eq $filter)
+        {
+            $this.Filter = ""
+        }
+        else
+        {
+            $this.Filter = $filter
+        }
         return $this
     }
     

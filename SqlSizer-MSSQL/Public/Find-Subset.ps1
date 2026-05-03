@@ -199,24 +199,6 @@ function Find-Subset
                     continue
                 }
 
-                $constraints = Get-TraversalConstraints -Fk $fk -Direction $Direction -TraversalConfiguration $TraversalConfiguration
-                if (-not (Test-TraversalConstraintsMatch `
-                    -Constraints $constraints `
-                    -SourceSchemaName $Table.SchemaName `
-                    -SourceTableName $Table.TableName `
-                    -ForeignKeyName $fk.Name))
-                {
-                    continue
-                }
-
-                $newState = Get-NewTraversalState -Direction $Direction -CurrentState $State -Fk $fk -TraversalConfiguration $TraversalConfiguration -FullSearch $FullSearch
-                
-                # Skip traversal when StateOverride is Exclude
-                if ($newState -eq [TraversalState]::Exclude)
-                {
-                    continue
-                }
-
                 # O(1) lookup using hashtable instead of Where-Object
                 $targetTableInfo = $tablesByFullName["$targetSchema, $targetTable"]
                 
@@ -230,25 +212,44 @@ function Find-Subset
                 $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
                 $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
 
-                # Build CTE-based query using shared function
-                $query = New-CTETraversalQuery `
-                    -SourceProcessing $processing `
-                    -TargetProcessing $targetProcessing `
-                    -SourceTable $Table `
-                    -TargetTable $targetTableInfo `
-                    -Fk $fk `
+                $branches = Get-TraversalRuleBranches `
                     -Direction $Direction `
-                    -NewState $newState `
-                    -SourceTableId $tableId `
-                    -TargetTableId $targetTableId `
-                    -FkId $fkId `
-                    -Constraints $constraints `
-                    -Iteration $Iteration `
-                    -SessionId $SessionId `
-                    -MaxBatchSize $MaxBatchSize `
+                    -CurrentState $State `
+                    -Fk $fk `
+                    -SourceSchemaName $Table.SchemaName `
+                    -SourceTableName $Table.TableName `
+                    -ForeignKeyName $fk.Name `
+                    -TraversalConfiguration $TraversalConfiguration `
                     -FullSearch $FullSearch
 
-                $queryList.Add($query)
+                foreach ($branch in $branches)
+                {
+                    $newState = [TraversalState]$branch.NewState
+                    if ($newState -eq [TraversalState]::Exclude)
+                    {
+                        continue
+                    }
+
+                    # Build CTE-based query using shared function
+                    $query = New-CTETraversalQuery `
+                        -SourceProcessing $processing `
+                        -TargetProcessing $targetProcessing `
+                        -SourceTable $Table `
+                        -TargetTable $targetTableInfo `
+                        -Fk $fk `
+                        -Direction $Direction `
+                        -NewState $newState `
+                        -SourceTableId $tableId `
+                        -TargetTableId $targetTableId `
+                        -FkId $fkId `
+                        -Constraints $branch.Constraints `
+                        -Iteration $Iteration `
+                        -SessionId $SessionId `
+                        -MaxBatchSize $MaxBatchSize `
+                        -FullSearch $FullSearch
+
+                    $queryList.Add($query)
+                }
             }
         }
 

@@ -49,6 +49,15 @@ $salesOrderHeaderRule = New-Object -Type TraversalRule -ArgumentList "Sales", "S
 $null = $salesOrderHeaderRule.SetStateOverride([TraversalState]::IncludeFull)
 $null = $config.AddRule($salesOrderHeaderRule)
 
+# To make this conditional instead of applying IncludeFull to every header, replace
+# the unfiltered rule above with ordered filtered/fallback rules like these.
+# $onlineHeaderRule = New-Object -Type TraversalRule -ArgumentList "Sales", "SalesOrderHeader"
+# $null = $onlineHeaderRule.SetFilter("[`$table].[OnlineOrderFlag] = 1").SetStateOverride([TraversalState]::IncludeFull)
+# $null = $config.AddRule($onlineHeaderRule)
+# $otherHeaderRule = New-Object -Type TraversalRule -ArgumentList "Sales", "SalesOrderHeader"
+# $null = $otherHeaderRule.SetStateOverride([TraversalState]::Include)
+# $null = $config.AddRule($otherHeaderRule)
+
 # SalesOrderHeader can fan out to many SalesOrderDetail rows through incoming traversal.
 # Keep the example small and deterministic.
 $salesOrderDetailRule = New-Object -Type TraversalRule -ArgumentList "Sales", "SalesOrderDetail"

@@ -7,6 +7,122 @@
     These functions handle state transitions, constraints, and traversal logic.
 #>
 
+function Get-DefaultTraversalState
+{
+    [CmdletBinding()]
+    [OutputType([TraversalState])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [TraversalDirection]$Direction,
+
+        [Parameter(Mandatory = $true)]
+        [TraversalState]$CurrentState,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$FullSearch = $false
+    )
+
+    if ($Direction -eq [TraversalDirection]::Outgoing)
+    {
+        if ($CurrentState -eq [TraversalState]::Include)
+        {
+            return [TraversalState]::Include
+        }
+        elseif ($CurrentState -eq [TraversalState]::IncludeFull)
+        {
+            return [TraversalState]::Include
+        }
+        elseif ($CurrentState -eq [TraversalState]::Pending)
+        {
+            return [TraversalState]::Pending
+        }
+        else
+        {
+            return [TraversalState]::Exclude
+        }
+    }
+
+    if ($CurrentState -eq [TraversalState]::Include)
+    {
+        if ($FullSearch)
+        {
+            return [TraversalState]::Include
+        }
+        return [TraversalState]::Exclude
+    }
+    elseif ($CurrentState -eq [TraversalState]::IncludeFull)
+    {
+        return [TraversalState]::Include
+    }
+    elseif ($CurrentState -eq [TraversalState]::InboundOnly)
+    {
+        return [TraversalState]::InboundOnly
+    }
+
+    return [TraversalState]::Exclude
+}
+
+function New-TraversalConstraintsResult
+{
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [TraversalRule]$Rule,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$PriorFilters = @()
+    )
+
+    $result = @{
+        MaxDepth         = $null
+        Top              = $null
+        SourceSchemaName = $null
+        SourceTableName  = $null
+        ForeignKeyName   = $null
+        Filter           = $null
+        PriorFilters     = @($PriorFilters)
+    }
+
+    if ($null -eq $Rule)
+    {
+        return $result
+    }
+
+    if ($null -ne $Rule.Constraints)
+    {
+        if ($Rule.Constraints.MaxDepth -ne -1)
+        {
+            $result.MaxDepth = $Rule.Constraints.MaxDepth
+        }
+        if ($Rule.Constraints.Top -ne -1)
+        {
+            $result.Top = $Rule.Constraints.Top
+        }
+        if ($Rule.Constraints.SourceSchemaName -ne "")
+        {
+            $result.SourceSchemaName = $Rule.Constraints.SourceSchemaName
+        }
+        if ($Rule.Constraints.SourceTableName -ne "")
+        {
+            $result.SourceTableName = $Rule.Constraints.SourceTableName
+        }
+        if ($Rule.Constraints.ForeignKeyName -ne "")
+        {
+            $result.ForeignKeyName = $Rule.Constraints.ForeignKeyName
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Rule.Filter))
+    {
+        $result.Filter = $Rule.Filter
+    }
+
+    return $result
+}
+
 function Get-NewTraversalState
 {
     <#
@@ -76,51 +192,7 @@ function Get-NewTraversalState
         throw
     }
 
-    $newState = $CurrentState
-
-    # Default state transitions
-    if ($Direction -eq [TraversalDirection]::Outgoing)
-    {
-        # When traversing outgoing FKs (dependencies):
-        # Include -> Include (include referenced data)
-        # IncludeFull -> Include (follow dependencies, but don't cascade IncludeFull)
-        # Exclude -> DO NOT TRAVERSE (exclusion is local, not propagated)
-        # Pending -> Pending (propagate uncertainty to dependencies)
-        if ($CurrentState -eq [TraversalState]::Include) {
-            $newState = [TraversalState]::Include
-        }
-        elseif ($CurrentState -eq [TraversalState]::IncludeFull) {
-            $newState = [TraversalState]::Include
-        }
-        elseif ($CurrentState -eq [TraversalState]::Pending) {
-            $newState = [TraversalState]::Pending
-        }
-        else {
-            # Exclude state: do not propagate
-            $newState = [TraversalState]::Exclude
-        }
-    }
-    elseif ($Direction -eq [TraversalDirection]::Incoming)
-    {
-        if ($CurrentState -eq [TraversalState]::Include)
-        {
-            $newState = if ($FullSearch) { [TraversalState]::Include } else { [TraversalState]::Exclude }
-        }
-        elseif ($CurrentState -eq [TraversalState]::IncludeFull)
-        {
-            # IncludeFull always traverses incoming and marks found rows as Include
-            $newState = [TraversalState]::Include
-        }
-        elseif ($CurrentState -eq [TraversalState]::InboundOnly)
-        {
-            $newState = [TraversalState]::InboundOnly
-        }
-        else
-        {
-            # Pending and Exclude do not traverse incoming.
-            $newState = [TraversalState]::Exclude
-        }
-    }
+    $newState = Get-DefaultTraversalState -Direction $Direction -CurrentState $CurrentState -FullSearch $FullSearch
 
     Write-Verbose "Traversal configuration override check for FK: $($Fk.Name)"
     # Apply TraversalConfiguration overrides if specified
@@ -140,6 +212,120 @@ function Get-NewTraversalState
     return $newState
 }
 
+function Get-TraversalRuleBranches
+{
+    <#
+    .SYNOPSIS
+        Builds ordered traversal rule branches for a target table relationship.
+    .DESCRIPTION
+        Rules are evaluated in TraversalConfiguration order. Each branch carries
+        row-level filter predicates plus the prior predicates that must not match
+        to preserve first-match semantics.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable[]])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [TraversalDirection]$Direction,
+
+        [Parameter(Mandatory = $true)]
+        [TraversalState]$CurrentState,
+
+        [Parameter(Mandatory = $true)]
+        [TableFk]$Fk,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceSchemaName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceTableName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ForeignKeyName,
+
+        [Parameter(Mandatory = $false)]
+        [TraversalConfiguration]$TraversalConfiguration,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$FullSearch = $false
+    )
+
+    $defaultState = Get-DefaultTraversalState -Direction $Direction -CurrentState $CurrentState -FullSearch $FullSearch
+    $branches = [System.Collections.Generic.List[hashtable]]::new()
+
+    if ($null -eq $TraversalConfiguration)
+    {
+        $branches.Add(@{
+            NewState    = $defaultState
+            Constraints = (New-TraversalConstraintsResult)
+            Rule        = $null
+        })
+        return ,$branches.ToArray()
+    }
+
+    $target = Get-TargetTableInfo -Fk $Fk -Direction $Direction
+    $rules = @($TraversalConfiguration.GetItemsForTable($target.Schema, $target.Table))
+    if ($rules.Count -eq 0)
+    {
+        $branches.Add(@{
+            NewState    = $defaultState
+            Constraints = (New-TraversalConstraintsResult)
+            Rule        = $null
+        })
+        return ,$branches.ToArray()
+    }
+
+    $priorFilters = [System.Collections.Generic.List[string]]::new()
+    $hasFallbackRule = $false
+    $matchedAnyRule = $false
+
+    foreach ($rule in $rules)
+    {
+        $constraints = New-TraversalConstraintsResult -Rule $rule -PriorFilters @($priorFilters.ToArray())
+        if (-not (Test-TraversalConstraintsMatch `
+                    -Constraints $constraints `
+                    -SourceSchemaName $SourceSchemaName `
+                    -SourceTableName $SourceTableName `
+                    -ForeignKeyName $ForeignKeyName))
+        {
+            continue
+        }
+
+        $matchedAnyRule = $true
+        $newState = $defaultState
+        if ($null -ne $rule.StateOverride)
+        {
+            $newState = $rule.StateOverride.State
+        }
+
+        $branches.Add(@{
+            NewState    = $newState
+            Constraints = $constraints
+            Rule        = $rule
+        })
+
+        if ([string]::IsNullOrWhiteSpace($rule.Filter))
+        {
+            $hasFallbackRule = $true
+            break
+        }
+
+        $priorFilters.Add($rule.Filter)
+    }
+
+    if ($matchedAnyRule -and -not $hasFallbackRule)
+    {
+        $branches.Add(@{
+            NewState    = $defaultState
+            Constraints = (New-TraversalConstraintsResult -PriorFilters @($priorFilters.ToArray()))
+            Rule        = $null
+        })
+    }
+
+    return ,$branches.ToArray()
+}
+
 function Get-TraversalConstraints
 {
     <#
@@ -147,7 +333,7 @@ function Get-TraversalConstraints
         Gets traversal constraints from TraversalConfiguration.
     .DESCRIPTION
         Pure function that retrieves constraints for FK traversal.
-        Returns a hashtable with MaxDepth, Top, source filter, and FK filter properties.
+        Returns a hashtable with MaxDepth, Top, relationship filters, and row filters.
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -163,13 +349,7 @@ function Get-TraversalConstraints
         [TraversalConfiguration]$TraversalConfiguration
     )
 
-    $result = @{
-        MaxDepth         = $null
-        Top              = $null
-        SourceSchemaName = $null
-        SourceTableName  = $null
-        ForeignKeyName   = $null
-    }
+    $result = New-TraversalConstraintsResult
 
     if ($null -ne $TraversalConfiguration)
     {
@@ -181,26 +361,11 @@ function Get-TraversalConstraints
         
         if ($null -ne $item -and $null -ne $item.Constraints)
         {
-            if ($item.Constraints.MaxDepth -ne -1)
-            {
-                $result.MaxDepth = $item.Constraints.MaxDepth
-            }
-            if ($item.Constraints.Top -ne -1)
-            {
-                $result.Top = $item.Constraints.Top
-            }
-            if ($item.Constraints.SourceSchemaName -ne "")
-            {
-                $result.SourceSchemaName = $item.Constraints.SourceSchemaName
-            }
-            if ($item.Constraints.SourceTableName -ne "")
-            {
-                $result.SourceTableName = $item.Constraints.SourceTableName
-            }
-            if ($item.Constraints.ForeignKeyName -ne "")
-            {
-                $result.ForeignKeyName = $item.Constraints.ForeignKeyName
-            }
+            $result = New-TraversalConstraintsResult -Rule $item
+        }
+        elseif ($null -ne $item)
+        {
+            $result = New-TraversalConstraintsResult -Rule $item
         }
     }
 
@@ -490,6 +655,43 @@ function Get-JoinConditions
     return ($joinConditions -join " AND ")
 }
 
+function Assert-ValidTraversalRuleFilter
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [string]$Filter
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Filter))
+    {
+        return
+    }
+
+    if ($Filter -match '[;]|--(?!\s*\[)|\bDROP\b|\bDELETE\b|\bEXEC\b|\bUPDATE\b')
+    {
+        throw "TraversalRule Filter contains potentially dangerous SQL: $Filter"
+    }
+}
+
+function ConvertTo-TraversalRuleFilterSql
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$Filter,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TargetAlias = 'tgt'
+    )
+
+    Assert-ValidTraversalRuleFilter -Filter $Filter
+    return ($Filter.Trim() -replace '\[\$table\]', $TargetAlias)
+}
+
 function Get-AdditionalWhereConditions
 {
     <#
@@ -519,6 +721,26 @@ function Get-AdditionalWhereConditions
     if ($null -ne $Constraints -and $null -ne $Constraints.MaxDepth)
     {
         $conditions += "src.Depth < $($Constraints.MaxDepth)"
+    }
+
+    if ($null -ne $Constraints)
+    {
+        foreach ($priorFilter in @($Constraints.PriorFilters))
+        {
+            if ([string]::IsNullOrWhiteSpace($priorFilter))
+            {
+                continue
+            }
+
+            $priorFilterSql = ConvertTo-TraversalRuleFilterSql -Filter $priorFilter -TargetAlias 'tgt'
+            $conditions += "NOT EXISTS (SELECT 1 WHERE $priorFilterSql)"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($Constraints.Filter))
+        {
+            $filterSql = ConvertTo-TraversalRuleFilterSql -Filter $Constraints.Filter -TargetAlias 'tgt'
+            $conditions += "($filterSql)"
+        }
     }
 
     return ,$conditions
@@ -559,6 +781,8 @@ function Get-IncludedTraversalStateSqlList
 }
 
 Export-ModuleMember -Function @(
+    'Get-DefaultTraversalState',
+    'Get-TraversalRuleBranches',
     'Get-NewTraversalState',
     'Get-TraversalConstraints',
     'Test-TraversalConstraintsMatch',
@@ -568,6 +792,8 @@ Export-ModuleMember -Function @(
     'Get-TargetTableInfo',
     'Test-ShouldSkipTable',
     'Get-JoinConditions',
+    'Assert-ValidTraversalRuleFilter',
+    'ConvertTo-TraversalRuleFilterSql',
     'Get-AdditionalWhereConditions',
     'Get-IncludedTraversalStateValues',
     'Get-IncludedTraversalStateSqlList'

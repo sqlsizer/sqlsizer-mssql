@@ -256,6 +256,150 @@ Describe 'Get-TraversalConstraints' {
         $result.SourceTableName | Should -Be 'Customers'
         $result.ForeignKeyName | Should -Be 'FK_Orders_Customers'
     }
+
+    It 'Returns row filter when configured' {
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.SetFilter('[$table].[Tier] = ''VIP''')
+        $config.Rules = @($rule)
+
+        $result = Get-TraversalConstraints `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -TraversalConfiguration $config
+
+        $result.Filter | Should -Be '[$table].[Tier] = ''VIP'''
+    }
+}
+
+Describe 'Get-TraversalRuleBranches' {
+    BeforeAll {
+        $mockFk = New-Object TableFk
+        $mockFk.Schema = 'dbo'
+        $mockFk.Table = 'Orders'
+        $mockFk.FkSchema = 'dbo'
+        $mockFk.FkTable = 'Customers'
+        $mockFk.Name = 'FK_Orders_Customers'
+    }
+
+    It 'Creates ordered filtered and fallback branches for the same table' {
+        $config = New-Object TraversalConfiguration
+        $vip = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $vip.SetFilter('[$table].[Tier] = ''VIP''').SetStateOverride([TraversalState]::IncludeFull)
+        $rest = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rest.SetStateOverride([TraversalState]::Include)
+        $config.AddRule($vip).AddRule($rest)
+
+        $result = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $mockFk `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Customers' `
+            -ForeignKeyName 'FK_Orders_Customers' `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -HaveCount 2
+        $result[0].NewState | Should -Be ([TraversalState]::IncludeFull)
+        $result[0].Constraints.Filter | Should -Be '[$table].[Tier] = ''VIP'''
+        $result[0].Constraints.PriorFilters | Should -HaveCount 0
+        $result[1].NewState | Should -Be ([TraversalState]::Include)
+        $result[1].Constraints.Filter | Should -BeNullOrEmpty
+        $result[1].Constraints.PriorFilters | Should -Contain '[$table].[Tier] = ''VIP'''
+    }
+
+    It 'Adds a default fallback when filtered rules do not cover the rest' {
+        $config = New-Object TraversalConfiguration
+        $vip = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $vip.SetFilter('[$table].[Tier] = ''VIP''').SetStateOverride([TraversalState]::IncludeFull)
+        $config.AddRule($vip)
+
+        $result = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $mockFk `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Customers' `
+            -ForeignKeyName 'FK_Orders_Customers' `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -HaveCount 2
+        $result[0].NewState | Should -Be ([TraversalState]::IncludeFull)
+        $result[1].NewState | Should -Be ([TraversalState]::Include)
+        $result[1].Rule | Should -BeNullOrEmpty
+        $result[1].Constraints.PriorFilters | Should -Contain '[$table].[Tier] = ''VIP'''
+    }
+
+    It 'Preserves first-match semantics for overlapping filtered rules' {
+        $config = New-Object TraversalConfiguration
+        $enterprise = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $enterprise.SetFilter('[$table].[Tier] = ''Enterprise''').SetStateOverride([TraversalState]::IncludeFull)
+        $open = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $open.SetFilter('[$table].[Status] = ''Open''').SetStateOverride([TraversalState]::Include)
+        $config.AddRule($enterprise).AddRule($open)
+
+        $result = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $mockFk `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Customers' `
+            -ForeignKeyName 'FK_Orders_Customers' `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -HaveCount 3
+        $result[1].Constraints.Filter | Should -Be '[$table].[Status] = ''Open'''
+        $result[1].Constraints.PriorFilters | Should -Contain '[$table].[Tier] = ''Enterprise'''
+        $result[2].Rule | Should -BeNullOrEmpty
+        $result[2].Constraints.PriorFilters | Should -Contain '[$table].[Tier] = ''Enterprise'''
+        $result[2].Constraints.PriorFilters | Should -Contain '[$table].[Status] = ''Open'''
+    }
+
+    It 'Carries filtered Exclude rules into fallback exclusions' {
+        $config = New-Object TraversalConfiguration
+        $blocked = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $blocked.SetFilter('[$table].[IsBlocked] = 1').SetStateOverride([TraversalState]::Exclude)
+        $rest = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rest.SetStateOverride([TraversalState]::Include)
+        $config.AddRule($blocked).AddRule($rest)
+
+        $result = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $mockFk `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Customers' `
+            -ForeignKeyName 'FK_Orders_Customers' `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -HaveCount 2
+        $result[0].NewState | Should -Be ([TraversalState]::Exclude)
+        $result[1].NewState | Should -Be ([TraversalState]::Include)
+        $result[1].Constraints.PriorFilters | Should -Contain '[$table].[IsBlocked] = 1'
+    }
+
+    It 'Returns no branches when only relationship-scoped rules do not match' {
+        $config = New-Object TraversalConfiguration
+        $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+        $rule.SetSourceFilter('dbo', 'Suppliers').SetStateOverride([TraversalState]::IncludeFull)
+        $config.AddRule($rule)
+
+        $result = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $mockFk `
+            -SourceSchemaName 'dbo' `
+            -SourceTableName 'Customers' `
+            -ForeignKeyName 'FK_Orders_Customers' `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -HaveCount 0
+    }
 }
 
 Describe 'Test-TraversalConstraintsMatch' {
@@ -669,6 +813,33 @@ Describe 'Get-AdditionalWhereConditions' {
         $result | Should -HaveCount 1
         $result[0] | Should -Not -Match "TOP"
     }
+
+    It 'Includes filtered rule predicate against target alias' {
+        $result = Get-AdditionalWhereConditions `
+            -Constraints @{ Filter = '[$table].[Tier] = ''VIP'''; PriorFilters = @() } `
+            -FkId 1 `
+            -FullSearch $true
+
+        $result | Should -Contain "(tgt.[Tier] = 'VIP')"
+    }
+
+    It 'Includes prior filters as first-match fallback exclusions' {
+        $result = Get-AdditionalWhereConditions `
+            -Constraints @{ PriorFilters = @('[$table].[Tier] = ''VIP''') } `
+            -FkId 1 `
+            -FullSearch $true
+
+        $result | Should -Contain "NOT EXISTS (SELECT 1 WHERE tgt.[Tier] = 'VIP')"
+    }
+
+    It 'Rejects dangerous filtered rule predicates' {
+        {
+            Get-AdditionalWhereConditions `
+                -Constraints @{ Filter = '[$table].[Tier] = ''VIP''; DROP TABLE dbo.Orders' } `
+                -FkId 1 `
+                -FullSearch $true
+        } | Should -Throw '*potentially dangerous SQL*'
+    }
 }
 
 Describe 'Get-IncludedTraversalStateValues' {
@@ -734,16 +905,25 @@ Describe 'TraversalRule Convenience Methods' {
             $rule.Constraints | Should -Not -BeNull
             $rule.Constraints.ForeignKeyName | Should -Be 'FK_Orders_Customers'
         }
+
+        It 'SetFilter sets row filter' {
+            $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+
+            $rule.SetFilter('[$table].[Tier] = ''VIP''')
+
+            $rule.Filter | Should -Be '[$table].[Tier] = ''VIP'''
+        }
         
         It 'Multiple constraint methods work together' {
             $rule = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
             
-            $rule.SetTop(100).SetMaxDepth(2).SetSourceFilter('Sales', 'Invoices')
+            $rule.SetTop(100).SetMaxDepth(2).SetSourceFilter('Sales', 'Invoices').SetFilter('[$table].[Tier] = ''VIP''')
             
             $rule.Constraints.Top | Should -Be 100
             $rule.Constraints.MaxDepth | Should -Be 2
             $rule.Constraints.SourceSchemaName | Should -Be 'Sales'
             $rule.Constraints.SourceTableName | Should -Be 'Invoices'
+            $rule.Filter | Should -Be '[$table].[Tier] = ''VIP'''
         }
         
         It 'SetStateOverride creates state override and sets state' {
@@ -798,6 +978,21 @@ Describe 'TraversalConfiguration Convenience Methods' {
             $result | Should -Be $config
             $config.Rules.Count | Should -Be 1
             $config.Rules[0] | Should -Be $rule
+        }
+
+        It 'GetItemsForTable preserves multiple rules in AddRule order' {
+            $config = New-Object TraversalConfiguration
+            $first = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+            $first.SetFilter('[$table].[Tier] = ''VIP''')
+            $second = New-Object TraversalRule -ArgumentList 'dbo', 'Orders'
+
+            $config.AddRule($first).AddRule($second)
+
+            $items = $config.GetItemsForTable('dbo', 'Orders')
+            $items | Should -HaveCount 2
+            $items[0] | Should -Be $first
+            $items[1] | Should -Be $second
+            $config.GetItemForTable('dbo', 'Orders') | Should -Be $first
         }
     }
 }

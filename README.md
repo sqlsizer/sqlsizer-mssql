@@ -133,6 +133,15 @@ $rule = [TraversalRule]::new("dbo", "CountryCode")
 $rule.SetStateOverride([TraversalState]::Exclude)
 $config.AddRule($rule)
 
+# Apply IncludeFull only to matching rows, then Include the rest
+$vip = [TraversalRule]::new("dbo", "Accounts")
+$vip.SetFilter("[`$table].[Tier] = 'VIP'").SetStateOverride([TraversalState]::IncludeFull)
+$config.AddRule($vip)
+
+$rest = [TraversalRule]::new("dbo", "Accounts")
+$rest.SetStateOverride([TraversalState]::Include)
+$config.AddRule($rest)
+
 Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
     -ConnectionInfo $conn -TraversalConfiguration $config
 ```
@@ -145,6 +154,7 @@ Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
 | `IgnoredTables` | Skip tables entirely during traversal |
 | `SourceFilter` | Only process when source table matches |
 | `ForeignKeyFilter` | Only process via a specific FK |
+| `Filter` | Apply a rule only to matching target rows, using `[$table]` as the target alias |
 
 ---
 

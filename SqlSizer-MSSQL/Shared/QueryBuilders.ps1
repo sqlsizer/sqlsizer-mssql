@@ -301,12 +301,16 @@ OUTPUT inserted.Depth INTO @InsertedRows
 SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
 FROM NewRecords;
 
--- Promote existing Pending records to Include if we found them via Include path
--- This handles the case where a record was first discovered as Pending, then later as Include
-$(if ($NewState -eq [TraversalState]::Include) {
+-- Promote existing records when a stronger include path finds them
+$(if (($NewState -eq [TraversalState]::Include) -or ($NewState -eq [TraversalState]::IncludeFull)) {
+    $eligibleStates = if ($NewState -eq [TraversalState]::IncludeFull) {
+        "$([int][TraversalState]::Pending), $([int][TraversalState]::Include)"
+    } else {
+        "$([int][TraversalState]::Pending)"
+    }
 @"
 UPDATE existing
-SET [State] = $([int][TraversalState]::Include),
+SET [State] = $([int]$NewState),
     Source = $SourceTableId,
     Fk = $FkId,
     Depth = nr.Depth,
@@ -321,7 +325,7 @@ INNER JOIN (
         AND tgt.$(ConvertTo-SqlIdentifier $targetColumns[0].Name) IS NOT NULL
         $whereClause
 ) nr ON $updateKeyClause
-WHERE existing.[State] = $([int][TraversalState]::Pending);
+WHERE existing.[State] IN ($eligibleStates);
 "@
 } else { "" })
 

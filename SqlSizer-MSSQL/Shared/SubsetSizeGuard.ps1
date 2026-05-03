@@ -205,54 +205,53 @@ function Get-SubsetGuardReachableTables
                         continue
                     }
 
-                    $constraints = Get-TraversalConstraints -Fk $fk -Direction $direction -TraversalConfiguration $TraversalConfiguration
-                    if (($null -ne $constraints.MaxDepth) -and ($depth -ge $constraints.MaxDepth))
-                    {
-                        continue
-                    }
-
-                    if (-not (Test-TraversalConstraintsMatch `
-                                -Constraints $constraints `
-                                -SourceSchemaName $table.SchemaName `
-                                -SourceTableName $table.TableName `
-                                -ForeignKeyName $fk.Name))
-                    {
-                        continue
-                    }
-
-                    $newState = Get-NewTraversalState `
+                    $branches = Get-TraversalRuleBranches `
                         -Direction $direction `
                         -CurrentState $state `
                         -Fk $fk `
+                        -SourceSchemaName $table.SchemaName `
+                        -SourceTableName $table.TableName `
+                        -ForeignKeyName $fk.Name `
                         -TraversalConfiguration $TraversalConfiguration `
                         -FullSearch $FullSearch
 
-                    if ($newState -eq [TraversalState]::Exclude)
+                    foreach ($branch in $branches)
                     {
-                        continue
-                    }
+                        $constraints = $branch.Constraints
+                        if (($null -ne $constraints.MaxDepth) -and ($depth -ge $constraints.MaxDepth))
+                        {
+                            continue
+                        }
 
-                    $targetKey = Get-SubsetGuardTableKey -SchemaName $targetSchema -TableName $targetTable
-                    if (-not $metrics.TablesByKey.ContainsKey($targetKey))
-                    {
-                        continue
-                    }
+                        $newState = [TraversalState]$branch.NewState
 
-                    if ($includedStates.Contains([int]$newState))
-                    {
-                        $null = $reachable.Add($targetKey)
-                    }
+                        if ($newState -eq [TraversalState]::Exclude)
+                        {
+                            continue
+                        }
 
-                    $targetStateKey = "$targetKey|$([int]$newState)"
-                    $targetDepth = $depth + 1
-                    if ((-not $visitedDepthByState.ContainsKey($targetStateKey)) -or $visitedDepthByState[$targetStateKey] -gt $targetDepth)
-                    {
-                        $visitedDepthByState[$targetStateKey] = $targetDepth
-                        $queue.Enqueue([pscustomobject]@{
-                            Table = $metrics.TablesByKey[$targetKey]
-                            State = $newState
-                            Depth = $targetDepth
-                        })
+                        $targetKey = Get-SubsetGuardTableKey -SchemaName $targetSchema -TableName $targetTable
+                        if (-not $metrics.TablesByKey.ContainsKey($targetKey))
+                        {
+                            continue
+                        }
+
+                        if ($includedStates.Contains([int]$newState))
+                        {
+                            $null = $reachable.Add($targetKey)
+                        }
+
+                        $targetStateKey = "$targetKey|$([int]$newState)"
+                        $targetDepth = $depth + 1
+                        if ((-not $visitedDepthByState.ContainsKey($targetStateKey)) -or $visitedDepthByState[$targetStateKey] -gt $targetDepth)
+                        {
+                            $visitedDepthByState[$targetStateKey] = $targetDepth
+                            $queue.Enqueue([pscustomobject]@{
+                                Table = $metrics.TablesByKey[$targetKey]
+                                State = $newState
+                                Depth = $targetDepth
+                            })
+                        }
                     }
                 }
             }

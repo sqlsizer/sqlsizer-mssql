@@ -168,6 +168,25 @@ Describe 'Subset size guard metadata reachability' {
         $result | Should -Contain 'dbo, SubCategories'
         $result | Should -Not -Contain 'dbo, Products'
     }
+
+    It 'treats filtered IncludeFull rules as possible matches during preflight' {
+        $config = New-Object TraversalConfiguration
+        $filtered = New-Object TraversalRule -ArgumentList 'dbo', 'SubCategories'
+        $filtered.SetFilter('[$table].[Name] IS NOT NULL').SetStateOverride([TraversalState]::IncludeFull)
+        $fallback = New-Object TraversalRule -ArgumentList 'dbo', 'SubCategories'
+        $fallback.SetStateOverride([TraversalState]::Include)
+        $config.AddRule($filtered).AddRule($fallback)
+
+        $result = Get-SubsetGuardReachableTables `
+            -DatabaseInfo $script:dbInfo `
+            -SeedStates @((New-SeedState -TableName 'Categories' -State ([TraversalState]::IncludeFull))) `
+            -TraversalConfiguration $config `
+            -FullSearch $false
+
+        $result | Should -Contain 'dbo, Categories'
+        $result | Should -Contain 'dbo, SubCategories'
+        $result | Should -Contain 'dbo, Products'
+    }
 }
 
 Describe 'Subset size guard threshold math' {

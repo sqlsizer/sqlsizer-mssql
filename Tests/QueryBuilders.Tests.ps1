@@ -357,7 +357,6 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
         Mock Get-ColumnValue { return "tgt.$ColumnName" }
         
         # Mock helper functions that might be called
-        Mock Get-AdditionalWhereConditions { return @() }
         Mock Get-TopClause { return "" }
     }
 
@@ -480,7 +479,7 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
         $result | Should -Match 'Depth = nr\.Depth'
         $result | Should -Match 'Iteration = 5'
         $result | Should -Match 'src\.Depth \+ 1 AS Depth'
-        $result | Should -Match 'WHERE existing\.\[State\] = 3'
+        $result | Should -Match 'WHERE existing\.\[State\] IN \(3\)'
     }
 
     It 'Includes FK name in comment' {
@@ -568,6 +567,92 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
 
         $result | Should -Match 'SELECT DISTINCT TOP \(2\)'
         $result | Should -Match 'ORDER BY Key0 ASC'
+    }
+
+    It 'Applies filtered rule predicate to target alias' {
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::Include) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{ Filter = '[$table].[Tier] = ''VIP'''; PriorFilters = @() } `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize -1 `
+            -FullSearch $false
+
+        $result | Should -Match "\(tgt\.\[Tier\] = 'VIP'\)"
+        $result | Should -Not -Match '\[\$table\]'
+    }
+
+    It 'Excludes earlier filtered matches from fallback branches' {
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::Include) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{ PriorFilters = @('[$table].[Tier] = ''VIP''') } `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize -1 `
+            -FullSearch $false
+
+        $result | Should -Match "NOT EXISTS \(SELECT 1 WHERE tgt\.\[Tier\] = 'VIP'\)"
+    }
+
+    It 'Rejects unsafe filtered rule predicates' {
+        {
+            New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable `
+                -TargetTable $mockTargetTable `
+                -Fk $mockFk `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 `
+                -TargetTableId 2 `
+                -FkId 10 `
+                -Constraints @{ Filter = '[$table].[Tier] = ''VIP''; DROP TABLE dbo.Orders' } `
+                -Iteration 5 `
+                -SessionId 'TEST-SESSION' `
+                -MaxBatchSize -1 `
+                -FullSearch $false
+        } | Should -Throw '*potentially dangerous SQL*'
+    }
+
+    It 'Promotes existing Include rows when a filtered IncludeFull path finds them' {
+        $result = New-CTETraversalQuery `
+            -SourceProcessing 'SqlSizer.Proc_Source' `
+            -TargetProcessing 'SqlSizer.Proc_Target' `
+            -SourceTable $mockSourceTable `
+            -TargetTable $mockTargetTable `
+            -Fk $mockFk `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -NewState ([TraversalState]::IncludeFull) `
+            -SourceTableId 1 `
+            -TargetTableId 2 `
+            -FkId 10 `
+            -Constraints @{ Filter = '[$table].[Tier] = ''VIP''' } `
+            -Iteration 5 `
+            -SessionId 'TEST-SESSION' `
+            -MaxBatchSize -1 `
+            -FullSearch $false
+
+        $result | Should -Match 'SET \[State\] = 5'
+        $result | Should -Match 'WHERE existing\.\[State\] IN \(3, 1\)'
     }
 
     Context 'Dynamic Key Column Generation' {
