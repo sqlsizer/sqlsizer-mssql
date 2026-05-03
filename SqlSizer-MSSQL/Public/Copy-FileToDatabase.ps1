@@ -24,9 +24,12 @@ function Copy-FileToDatabase
     $tableExists = Test-TableExists -SchemaName "SqlSizer" -TableName "Files" -Database $Database -ConnectionInfo $ConnectionInfo
     if ($tableExists -eq $false)
     {
-        $tmp = "CREATE TABLE SqlSizer.Files(Id int primary key identity(1,1), FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
+        $tmp = "CREATE TABLE SqlSizer.Files(Id bigint primary key identity(1,1), FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
         Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
     }
+
+    $indexSql = "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SqlSizer_Files_FileId_Index' AND object_id = OBJECT_ID('SqlSizer.Files')) CREATE INDEX IX_SqlSizer_Files_FileId_Index ON SqlSizer.Files(FileId, [Index])"
+    $null = Invoke-SqlcmdEx -Sql $indexSql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     $id = New-Guid
     $fileContent = [System.IO.File]::ReadAllText($FilePath)

@@ -50,11 +50,10 @@ function Remove-DataFromFileSet
             $columns += "[" + $column.Name + "] " + $type
         }
 
-        $sql = "DECLARE @json NVARCHAR(MAX); SELECT @json = STRING_AGG([Content], '') FROM SqlSizer.Files WHERE [FileId] = '$($file.FileId)'
+        $sql = "DECLARE @json NVARCHAR(MAX); SELECT @json = STRING_AGG([Content], '') WITHIN GROUP (ORDER BY [Index]) FROM SqlSizer.Files WHERE [FileId] = '$($file.FileId)'
                 DELETE t
                 FROM OpenJson(@json) with ($([string]::join(', ', $columns)))  as o
                 INNER JOIN [$($tableInfo.SchemaName)].[$($tableInfo.TableName)] t ON $([string]::join(' and ', $where))"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
     }
 }
-

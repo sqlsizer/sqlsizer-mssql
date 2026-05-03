@@ -18,7 +18,7 @@ function Enable-TableTriggers
 
     Write-Progress -Activity "Enabling all triggers on table $SchemaName.$TableName" -PercentComplete 0
 
-    $sql = "ENABLE TRIGGER ALL ON $SchemaName.$TableName"
+    $sql = "ENABLE TRIGGER ALL ON $(ConvertTo-SqlIdentifier $SchemaName).$(ConvertTo-SqlIdentifier $TableName)"
 
     $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 

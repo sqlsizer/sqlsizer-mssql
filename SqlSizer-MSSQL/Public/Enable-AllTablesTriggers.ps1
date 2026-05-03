@@ -17,6 +17,16 @@ function Enable-AllTablesTriggers
 
     foreach ($table in $DatabaseInfo.Tables)
     {
+        if ($table.SchemaName.StartsWith("SqlSizer"))
+        {
+            continue
+        }
+
+        if (-not (Test-TableExists -Database $Database -SchemaName $table.SchemaName -TableName $table.TableName -ConnectionInfo $ConnectionInfo))
+        {
+            continue
+        }
+
         Enable-TableTriggers -Database $Database -ConnectionInfo $ConnectionInfo -SchemaName $table.SchemaName -TableName $table.TableName
     }
 

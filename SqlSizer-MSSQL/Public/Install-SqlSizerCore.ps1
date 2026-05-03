@@ -44,10 +44,13 @@ function Install-SqlSizerCore
             END"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
-    $tmp = "CREATE TABLE SqlSizer.Files(Id int identity(1,1) $pk, FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
+    $tmp = "CREATE TABLE SqlSizer.Files(Id bigint identity(1,1) $pk, FileId uniqueidentifier, [Index] int, [Content] nvarchar(max))"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
-    $tmp = "CREATE TABLE SqlSizer.Tables(Id int identity(1,1) $pk, [Schema] varchar(128), [TableName] varchar(128))"
+    $tmp = "CREATE INDEX IX_SqlSizer_Files_FileId_Index ON SqlSizer.Files(FileId, [Index])"
+    $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
+    $tmp = "CREATE TABLE SqlSizer.Tables(Id bigint identity(1,1) $pk, [Schema] varchar(128), [TableName] varchar(128))"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     $tmp = "IF OBJECT_ID('SqlSizer.Sessions') IS NULL
@@ -57,7 +60,7 @@ function Install-SqlSizerCore
     $sql = "CREATE NONCLUSTERED INDEX [Index] ON SqlSizer.Tables ([Schema] ASC, [TableName] ASC)"
     $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
-    $tmp = "CREATE TABLE SqlSizer.ForeignKeys(Id int identity(1,1) $pk, [FkTableId] int, [TableId] int, [Name] varchar(256))"
+    $tmp = "CREATE TABLE SqlSizer.ForeignKeys(Id bigint identity(1,1) $pk, [FkTableId] bigint, [TableId] bigint, [Name] varchar(256))"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     foreach ($table in $DatabaseInfo.Tables)
@@ -81,7 +84,7 @@ function Install-SqlSizerCore
         }
     }
 
-    $tmp = "CREATE TABLE SqlSizer.Operations(Id INT identity(1,1) $pk, [Table] SMALLINT, [State] INT, [ToProcess] INT NOT NULL, [Processed] INT NULL, [Status] INT NULL, [Source] INT, [Fk] INT, [Depth] INT, [Created] DATETIME NOT NULL, [ProcessedDate] DATETIME NULL, [SessionId] VARCHAR(256) NOT NULL, [FoundIteration] INT NOT NULL, [ProcessedIteration] INT NULL)"
+    $tmp = "CREATE TABLE SqlSizer.Operations(Id bigint identity(1,1) $pk, [Table] bigint, [State] INT, [ToProcess] bigint NOT NULL, [Processed] bigint NULL, [Status] INT NULL, [Source] bigint, [Fk] bigint, [Depth] INT, [Created] DATETIME NOT NULL, [ProcessedDate] DATETIME NULL, [SessionId] VARCHAR(256) NOT NULL, [FoundIteration] INT NOT NULL, [ProcessedIteration] bigint NULL)"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
     $tmp = "CREATE NONCLUSTERED INDEX [Index] ON SqlSizer.Operations ([Table] ASC, [State] ASC, [Source] ASC, [Depth] ASC)"
@@ -109,7 +112,7 @@ function Install-SqlSizerCore
 
     if ((Test-TableExists -Database $Database -SchemaName "SqlSizerHistory" -TableName "SubsetTable" -ConnectionInfo $ConnectionInfo) -eq $false)
     {
-        $sql = "CREATE TABLE SqlSizerHistory.SubsetTable ([Id] int identity(1,1) $pk, [SchemaName] varchar(256), [TableName] varchar(256), [PrimaryKeySize] int NOT NULL, [RowCount] int NOT NULL,  [SubsetId] int NOT NULL)"
+        $sql = "CREATE TABLE SqlSizerHistory.SubsetTable ([Id] bigint identity(1,1) $pk, [SchemaName] varchar(256), [TableName] varchar(256), [PrimaryKeySize] int NOT NULL, [RowCount] bigint NOT NULL,  [SubsetId] int NOT NULL)"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
         $sql = "ALTER TABLE SqlSizerHistory.SubsetTable ADD CONSTRAINT SubsetTable_SubsetId FOREIGN KEY (SubsetId) REFERENCES SqlSizerHistory.Subset([Id]) ON DELETE CASCADE"

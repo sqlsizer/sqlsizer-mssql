@@ -48,9 +48,10 @@ function Install-SqlSizerSecureViews
         $hashInput = GetHashInput -hashSelect $hashSelect
 
         # create a view
-        $sql = "CREATE VIEW SqlSizer_$($SessionId).Secure_$($table.SchemaName)_$($table.TableName) AS SELECT ROW_NUMBER() OVER(ORDER BY (SELECT NULL)) AS SqlSizer_RowSequence, $tableSelect, HASHBYTES('SHA2_512', $hashInput) as row_sha2_512 FROM $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
+        $rowOrderBy = GetSecureViewsPrimaryKeyOrderBy -TableInfo $table
+        $sql = "CREATE VIEW SqlSizer_$($SessionId).Secure_$($table.SchemaName)_$($table.TableName) AS SELECT ROW_NUMBER() OVER(ORDER BY $rowOrderBy) AS SqlSizer_RowSequence, $tableSelect, HASHBYTES('SHA2_512', $hashInput) as row_sha2_512 FROM $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
-        $null = $total.Add("SELECT '$($table.SchemaName)' as [Schema], '$($table.TableName)' as [Table],  CONVERT(VARCHAR(max), HASHBYTES('SHA1', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|')), 2) as [TableHash_SHA_1], CONVERT(VARCHAR(max), HASHBYTES('SHA2_256', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|')), 2) as [TableHash_SHA_256],  CONVERT(VARCHAR(max), HASHBYTES('SHA2_512', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|')), 2) as [TableHash_SHA_512] FROM SqlSizer_$($SessionId).Secure_$($table.SchemaName)_$($table.TableName)")
+        $null = $total.Add("SELECT '$($table.SchemaName)' as [Schema], '$($table.TableName)' as [Table],  CONVERT(VARCHAR(max), HASHBYTES('SHA1', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|') WITHIN GROUP (ORDER BY SqlSizer_RowSequence)), 2) as [TableHash_SHA_1], CONVERT(VARCHAR(max), HASHBYTES('SHA2_256', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|') WITHIN GROUP (ORDER BY SqlSizer_RowSequence)), 2) as [TableHash_SHA_256],  CONVERT(VARCHAR(max), HASHBYTES('SHA2_512', STRING_AGG(CONVERT(VARCHAR(max), row_sha2_512, 2), '|') WITHIN GROUP (ORDER BY SqlSizer_RowSequence)), 2) as [TableHash_SHA_512] FROM SqlSizer_$($SessionId).Secure_$($table.SchemaName)_$($table.TableName)")
     }
 
     if ($total.Count -ne 0)
@@ -58,6 +59,20 @@ function Install-SqlSizerSecureViews
         $sql = "CREATE VIEW SqlSizer_$($SessionId).Secure_Summary AS $([string]::Join(' UNION ALL ', $total))"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
+}
+
+function GetSecureViewsPrimaryKeyOrderBy
+{
+    param (
+        [TableInfo]$TableInfo
+    )
+
+    $columns = foreach ($column in $TableInfo.PrimaryKey)
+    {
+        "t.$(ConvertTo-SqlIdentifier $column.Name) ASC"
+    }
+
+    return [string]::Join(', ', $columns)
 }
 
 function GetHashInput
@@ -129,7 +144,7 @@ function GetSecureViewsTableJoin
     foreach ($column in $primaryKey)
     {
         $select += "p.Key$i"
-        $join += "t.$column = rr.Key$i"
+        $join += "t.$(ConvertTo-SqlIdentifier $column.Name) = rr.Key$i"
         $i = $i + 1
     }
 

@@ -46,7 +46,7 @@ function Get-SubsetTableStatistics
             $keys += "Key$i"
         }
 
-        $sql = "SELECT COUNT(*) AS [Count]
+        $sql = "SELECT COUNT_BIG(*) AS [Count]
                 FROM (
                     SELECT DISTINCT $([string]::Join(', ', $keys))
                     FROM $processing

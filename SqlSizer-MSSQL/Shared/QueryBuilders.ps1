@@ -82,13 +82,13 @@ function New-CTETraversalQuery
         [TraversalState]$NewState,
         
         [Parameter(Mandatory = $true)]
-        [int]$SourceTableId,
+        [long]$SourceTableId,
         
         [Parameter(Mandatory = $true)]
-        [int]$TargetTableId,
+        [long]$TargetTableId,
         
         [Parameter(Mandatory = $true)]
-        [int]$FkId,
+        [long]$FkId,
         
         [Parameter(Mandatory = $true)]
         [hashtable]$Constraints,
@@ -327,19 +327,19 @@ WHERE existing.[State] = $([int][TraversalState]::Pending);
 
 -- Update operations table
 INSERT INTO SqlSizer.Operations (
-    [Table], [State], ToProcess, Processed, Status, Source, Fk, Depth, 
+    [Table], [State], ToProcess, Processed, Status, Source, Fk, Depth,
     Created, ProcessedDate, SessionId, FoundIteration, ProcessedIteration
 )
-SELECT 
-    $TargetTableId, 
-    $([int]$NewState), 
-    COUNT(*), 
-    0, 
-    NULL, 
-    $SourceTableId, 
-    $FkId, 
-    Depth, 
-    GETDATE(), 
+SELECT
+    $TargetTableId,
+    $([int]$NewState),
+    COUNT_BIG(*),
+    0,
+    NULL,
+    $SourceTableId,
+    $FkId,
+    Depth,
+    GETDATE(),
     NULL, 
     $sessionIdLiteral,
     $Iteration, 
@@ -469,7 +469,7 @@ function New-MarkOperationInProgressQuery
     param
     (
         [Parameter(Mandatory = $true)]
-        [int]$TableId,
+        [long]$TableId,
         
         [Parameter(Mandatory = $true)]
         [int]$State,
@@ -504,9 +504,9 @@ WHERE [Table] = $TableId
         # Process in batches - must separate SELECT and UPDATE since SQL Server
         # doesn't allow mixing column updates with variable assignment in SET clause
         return @"
-DECLARE @Remaining INT = $MaxBatchSize;
-DECLARE @ProcessThisRow INT;
-DECLARE @OperationId INT;
+DECLARE @Remaining bigint = $MaxBatchSize;
+DECLARE @ProcessThisRow bigint;
+DECLARE @OperationId bigint;
 
 WHILE @Remaining > 0
 BEGIN
@@ -610,7 +610,7 @@ function New-GetIterationStatisticsQuery
 
     return @"
 SELECT 
-    COUNT(*) AS TotalOperations,
+    COUNT_BIG(*) AS TotalOperations,
     SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) AS CompletedOperations,
     SUM(Processed) AS TotalRecordsProcessed,
     SUM(ToProcess - Processed) AS TotalRecordsRemaining,

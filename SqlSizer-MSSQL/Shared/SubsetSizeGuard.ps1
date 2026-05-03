@@ -558,19 +558,22 @@ function Get-SubsetGuardSubsetRows
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    $subsetStats = Get-SubsetTableStatistics `
-        -SessionId $SessionId `
-        -Database $Database `
-        -DatabaseInfo $DatabaseInfo `
-        -ConnectionInfo $ConnectionInfo
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+    $includedStates = Get-IncludedTraversalStateSqlList
+    $sql = @"
+SELECT ISNULL(SUM(CAST(ToProcess AS bigint)), 0) AS SubsetRows
+FROM SqlSizer.Operations
+WHERE SessionId = $sessionIdLiteral
+    AND [State] IN ($includedStates);
+"@
 
-    $sum = ($subsetStats | Measure-Object -Property RowCount -Sum).Sum
-    if ($null -eq $sum)
+    $row = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+    if ($null -eq $row -or $null -eq $row.SubsetRows)
     {
         return 0
     }
 
-    return [long]$sum
+    return [long]$row.SubsetRows
 }
 
 function Write-SubsetGuardPreflightWarning

@@ -65,7 +65,7 @@ function Import-SubsetFromFileSet
             $prefix = $SourceDatabase + "."
         }
 
-        $sql = "DECLARE @json NVARCHAR(MAX); SELECT @json = STRING_AGG([Content], '') FROM $($prefix)SqlSizer.Files WHERE [FileId] = '$($file.FileId)'
+        $sql = "DECLARE @json NVARCHAR(MAX); SELECT @json = STRING_AGG([Content], '') WITHIN GROUP (ORDER BY [Index]) FROM $($prefix)SqlSizer.Files WHERE [FileId] = '$($file.FileId)'
                 $identity_on
 
                 INSERT INTO [$($tableInfo.SchemaName)].[$($tableInfo.TableName)] ($tableSelect)

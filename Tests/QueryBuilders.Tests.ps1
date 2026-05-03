@@ -111,8 +111,8 @@ Describe 'New-MarkOperationInProgressQuery' {
                 -SessionId 'TEST' `
                 -MaxBatchSize 1000
 
-            $result | Should -Match 'DECLARE @Remaining INT = 1000'
-            $result | Should -Match 'DECLARE @OperationId INT'
+            $result | Should -Match 'DECLARE @Remaining bigint = 1000'
+            $result | Should -Match 'DECLARE @OperationId bigint'
             $result | Should -Match 'CASE'
             $result | Should -Match '@Remaining'
         }
@@ -207,7 +207,7 @@ Describe 'New-GetIterationStatisticsQuery' {
     It 'Selects all required statistics' {
         $result = New-GetIterationStatisticsQuery -SessionId 'TEST'
 
-        $result | Should -Match 'COUNT\(\*\) AS TotalOperations'
+        $result | Should -Match 'COUNT_BIG\(\*\) AS TotalOperations'
         $result | Should -Match 'CompletedOperations'
         $result | Should -Match 'TotalRecordsProcessed'
         $result | Should -Match 'TotalRecordsRemaining'

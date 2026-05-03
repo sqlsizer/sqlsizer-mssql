@@ -3,7 +3,8 @@ Import-Module "$modulePath\SqlSizer-MSSQL\SqlSizer-MSSQL" -Force -Global -ErrorA
 
 Describe 'Initialize-StartSet seed query optimization' {
     InModuleScope SqlSizer-MSSQL {
-        function New-StartSetTestColumn {
+        BeforeAll {
+            function New-StartSetTestColumn {
             param(
                 [Parameter(Mandatory = $true)]
                 [string]$Name,
@@ -19,9 +20,9 @@ Describe 'Initialize-StartSet seed query optimization' {
             $column.IsPresent = $true
 
             return $column
-        }
+            }
 
-        function New-StartSetTestTable {
+            function New-StartSetTestTable {
             $table = New-Object TableInfo
             $table.SchemaName = 'dbo'
             $table.TableName = 'Orders'
@@ -44,9 +45,9 @@ Describe 'Initialize-StartSet seed query optimization' {
             $table.Indexes.Add($index) | Out-Null
 
             return $table
-        }
+            }
 
-        function New-StartSetTestQuery {
+            function New-StartSetTestQuery {
             param(
                 [Parameter(Mandatory = $false)]
                 [string[]]$KeyColumns = @('TenantId', 'OrderId'),
@@ -71,9 +72,9 @@ Describe 'Initialize-StartSet seed query optimization' {
             $query.OrderBy = $OrderBy
 
             return $query
-        }
+            }
 
-        function New-StartSetSqlUnderTest {
+            function New-StartSetSqlUnderTest {
             param(
                 [Parameter(Mandatory = $true)]
                 [SqlSizerQuery]$Query,
@@ -87,9 +88,9 @@ Describe 'Initialize-StartSet seed query optimization' {
                 -Table $Table `
                 -ProcessingTable 'SqlSizer_S1.dbo_Orders' `
                 -StartIteration 0
-        }
+            }
 
-        function Invoke-AndCaptureExceptionMessage {
+            function Invoke-AndCaptureExceptionMessage {
             param(
                 [Parameter(Mandatory = $true)]
                 [scriptblock]$ScriptBlock
@@ -105,6 +106,7 @@ Describe 'Initialize-StartSet seed query optimization' {
             }
 
             return $null
+            }
         }
 
         It 'adds primary key ORDER BY when Top is set without OrderBy' {
@@ -112,8 +114,8 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $sql = New-StartSetSqlUnderTest -Query $query
 
-            $sql | Should Match 'SELECT\s+TOP 5\s+\[\$table\]\.\[TenantId\], \[\$table\]\.\[OrderId\], 1 as \[State\]'
-            $sql | Should Match 'ORDER BY \[\$table\]\.\[TenantId\] ASC, \[\$table\]\.\[OrderId\] ASC$'
+            $sql | Should -Match 'SELECT\s+TOP 5\s+\[\$table\]\.\[TenantId\], \[\$table\]\.\[OrderId\], 1 as \[State\]'
+            $sql | Should -Match 'ORDER BY \[\$table\]\.\[TenantId\] ASC, \[\$table\]\.\[OrderId\] ASC$'
         }
 
         It 'emits composite keys in metadata primary key order' {
@@ -121,7 +123,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $sql = New-StartSetSqlUnderTest -Query $query
 
-            $sql | Should Match 'SELECT\s+TOP 1\s+\[\$table\]\.\[TenantId\], \[\$table\]\.\[OrderId\], 1 as \[State\]'
+            $sql | Should -Match 'SELECT\s+TOP 1\s+\[\$table\]\.\[TenantId\], \[\$table\]\.\[OrderId\], 1 as \[State\]'
         }
 
         It 'keeps explicit OrderBy and appends missing primary key tie breakers' {
@@ -129,7 +131,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $sql = New-StartSetSqlUnderTest -Query $query
 
-            $sql | Should Match 'ORDER BY \[\$table\]\.\[CreatedAt\] DESC, \[\$table\]\.\[TenantId\] ASC, \[\$table\]\.\[OrderId\] ASC$'
+            $sql | Should -Match 'ORDER BY \[\$table\]\.\[CreatedAt\] DESC, \[\$table\]\.\[TenantId\] ASC, \[\$table\]\.\[OrderId\] ASC$'
         }
 
         It 'does not duplicate primary key columns already present in explicit OrderBy' {
@@ -137,8 +139,8 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $sql = New-StartSetSqlUnderTest -Query $query
 
-            $sql | Should Match 'ORDER BY \[\$table\]\.\[TenantId\] DESC, \[\$table\]\.\[OrderId\] ASC$'
-            $sql | Should Not Match 'TenantId\] DESC, \[\$table\]\.\[TenantId\] ASC'
+            $sql | Should -Match 'ORDER BY \[\$table\]\.\[TenantId\] DESC, \[\$table\]\.\[OrderId\] ASC$'
+            $sql | Should -Not -Match 'TenantId\] DESC, \[\$table\]\.\[TenantId\] ASC'
         }
 
         It 'throws when KeyColumns are missing primary key columns' {
@@ -146,7 +148,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'must exactly match primary key columns'
+            $message | Should -Match 'must exactly match primary key columns'
         }
 
         It 'throws when KeyColumns include extra columns' {
@@ -154,7 +156,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'must exactly match primary key columns'
+            $message | Should -Match 'must exactly match primary key columns'
         }
 
         It 'throws when KeyColumns include non-primary-key columns' {
@@ -162,7 +164,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'must exactly match primary key columns'
+            $message | Should -Match 'must exactly match primary key columns'
         }
 
         It 'throws when Top is negative' {
@@ -170,7 +172,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'Top must be greater than or equal to 0'
+            $message | Should -Match 'Top must be greater than or equal to 0'
         }
 
         It 'keeps rejecting dangerous Where clauses' {
@@ -178,7 +180,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'Where clause contains potentially dangerous SQL'
+            $message | Should -Match 'Where clause contains potentially dangerous SQL'
         }
 
         It 'keeps rejecting dangerous OrderBy clauses' {
@@ -186,7 +188,7 @@ Describe 'Initialize-StartSet seed query optimization' {
 
             $message = Invoke-AndCaptureExceptionMessage -ScriptBlock { New-StartSetSqlUnderTest -Query $query }
 
-            $message | Should Match 'OrderBy clause contains potentially dangerous SQL'
+            $message | Should -Match 'OrderBy clause contains potentially dangerous SQL'
         }
 
         It 'warns when Where does not reference a known primary key or indexed column' {
@@ -195,8 +197,8 @@ Describe 'Initialize-StartSet seed query optimization' {
             $output = & { New-StartSetSqlUnderTest -Query $query } 3>&1
             $warnings = @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
 
-            $warnings.Count | Should Be 1
-            [string]$warnings[0] | Should Match 'does not appear to reference a primary key or indexed column'
+            $warnings.Count | Should -Be 1
+            [string]$warnings[0] | Should -Match 'does not appear to reference a primary key or indexed column'
         }
     }
 }

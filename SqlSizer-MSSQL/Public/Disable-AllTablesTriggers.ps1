@@ -17,6 +17,16 @@ function Disable-AllTablesTriggers
 
     foreach ($table in $DatabaseInfo.Tables)
     {
+        if ($table.SchemaName.StartsWith("SqlSizer"))
+        {
+            continue
+        }
+
+        if (-not (Test-TableExists -Database $Database -SchemaName $table.SchemaName -TableName $table.TableName -ConnectionInfo $ConnectionInfo))
+        {
+            continue
+        }
+
         Disable-TableTriggers -Database $Database -ConnectionInfo $ConnectionInfo -SchemaName $table.SchemaName -TableName $table.TableName
     }
 

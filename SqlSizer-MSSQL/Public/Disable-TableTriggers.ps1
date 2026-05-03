@@ -18,7 +18,7 @@ function Disable-TableTriggers
 
     Write-Progress -Activity "Disabling all triggers on table $SchemaName.$TableName" -PercentComplete 0
 
-    $sql = "DISABLE TRIGGER ALL ON $SchemaName.$TableName"
+    $sql = "DISABLE TRIGGER ALL ON $(ConvertTo-SqlIdentifier $SchemaName).$(ConvertTo-SqlIdentifier $TableName)"
 
     $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 

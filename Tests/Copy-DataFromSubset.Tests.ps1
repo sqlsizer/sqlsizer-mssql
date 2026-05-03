@@ -103,7 +103,7 @@ Describe 'Copy-DataFromSubset SQL generation' {
 
             $sql | Should -Not -Match 'CONVERT\('
             $sql | Should -Not -Match 'Result_'
-            $sql | Should -Match 'SELECT src\.\[Id\], src\.\[TenantId\], src\.\[XmlPayload\], src\.\[GeoPoint\], src\.\[HierarchyNode\], src\.\[ImageData\], src\.\[RefId\] FROM'
+            $sql | Should -Match 'SELECT src\.\[Id\], src\.\[TenantId\], src\.\[XmlPayload\], src\.\[GeoPoint\], src\.\[HierarchyNode\], src\.\[ImageData\], src\.\[RefId\]\s+FROM'
             $sql | Should -Not -Match 'ComputedTotal|GeneratedValue|RowVersion'
         }
 
@@ -117,8 +117,32 @@ Describe 'Copy-DataFromSubset SQL generation' {
                 -ProcessingTableName 'dbo_Orders'
 
             ([regex]::Matches($sql, 'SELECT DISTINCT')).Count | Should -Be 1
-            $sql | Should -Match '\(SELECT DISTINCT \[Key0\], \[Key1\] FROM \[SourceDb\]\.\[SqlSizer_S1\]\.\[dbo_Orders\] WHERE \[State\] IN \(1, 4, 5\)\)'
+            $sql | Should -Match 'DistinctSubsetKeys AS'
+            $sql | Should -Match 'SELECT DISTINCT \[Key0\], \[Key1\]'
+            $sql | Should -Match 'FROM \[SourceDb\]\.\[SqlSizer_S1\]\.\[dbo_Orders\]'
             $sql | Should -Not -Match 'SELECT DISTINCT src\.'
+        }
+
+        It 'Builds deterministic batched copy progress SQL' {
+            $table = New-CopySubsetTestTable
+
+            $sql = New-CopyDataFromSubsetQuery `
+                -SessionId 'S1' `
+                -Source 'SourceDb' `
+                -TableInfo $table `
+                -ProcessingTableName 'dbo_Orders' `
+                -BatchSize 25 `
+                -Resume $true
+
+            $sql | Should -Match 'DECLARE @BatchSize bigint = 25'
+            $sql | Should -Match 'DECLARE @Resume bit = 1'
+            $sql | Should -Match 'ROW_NUMBER\(\) OVER \(ORDER BY \[Key0\] ASC, \[Key1\] ASC\)'
+            $sql | Should -Match 'MERGE SqlSizer\.CopyProgress'
+            $sql | Should -Match 'WHILE @CopiedRows < @TotalRows'
+            $sql | Should -Match 'SqlSizer_CopyRowNumber BETWEEN @BatchStart AND @BatchEnd'
+            $sql | Should -Match 'LastKeyJson = @LastKeyJson'
+            $sql | Should -Match 'NOT EXISTS'
+            $sql | Should -Match 'existing\.\[Id\] = src\.\[Id\]'
         }
 
         It 'Keeps ignored FK columns in the insert list and selects NULL for them' {
@@ -132,7 +156,7 @@ Describe 'Copy-DataFromSubset SQL generation' {
                 -IgnoredTables @(New-IgnoredTable)
 
             $sql | Should -Match 'INSERT INTO \[dbo\]\.\[Orders\] \(\[Id\], \[TenantId\], \[XmlPayload\], \[GeoPoint\], \[HierarchyNode\], \[ImageData\], \[RefId\]\)'
-            $sql | Should -Match 'SELECT src\.\[Id\], src\.\[TenantId\], src\.\[XmlPayload\], src\.\[GeoPoint\], src\.\[HierarchyNode\], src\.\[ImageData\], NULL FROM'
+            $sql | Should -Match 'SELECT src\.\[Id\], src\.\[TenantId\], src\.\[XmlPayload\], src\.\[GeoPoint\], src\.\[HierarchyNode\], src\.\[ImageData\], NULL\s+FROM'
         }
 
         It 'Wraps identity inserts around the generated insert statement' {
@@ -145,8 +169,45 @@ Describe 'Copy-DataFromSubset SQL generation' {
                 -ProcessingTableName 'dbo_Orders'
             $sql = Add-CopyDataFromSubsetIdentityInsert -Sql $sql -TableInfo $table
 
-            $sql | Should -Match '^SET IDENTITY_INSERT \[dbo\]\.\[Orders\] ON; INSERT INTO'
+            $sql | Should -Match '^SET IDENTITY_INSERT \[dbo\]\.\[Orders\] ON; DECLARE @BatchSize'
             $sql | Should -Match '; SET IDENTITY_INSERT \[dbo\]\.\[Orders\] OFF$'
+        }
+
+        It 'Orders tables by foreign key dependencies when constraints stay enabled' {
+            $id = New-TestColumn -Name 'Id'
+            $parent = New-Object -TypeName TableInfo
+            $parent.SchemaName = 'dbo'
+            $parent.TableName = 'Parent'
+            $parent.PrimaryKey = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+            $parent.ForeignKeys = New-Object 'System.Collections.Generic.List[TableFk]'
+            $parent.PrimaryKey.Add($id) | Out-Null
+
+            $child = New-Object -TypeName TableInfo
+            $child.SchemaName = 'dbo'
+            $child.TableName = 'Child'
+            $child.PrimaryKey = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+            $child.ForeignKeys = New-Object 'System.Collections.Generic.List[TableFk]'
+            $child.PrimaryKey.Add($id) | Out-Null
+
+            $fk = New-Object -TypeName TableFk
+            $fk.Schema = 'dbo'
+            $fk.Table = 'Parent'
+            $child.ForeignKeys.Add($fk) | Out-Null
+
+            $databaseInfo = New-Object -TypeName DatabaseInfo
+            $databaseInfo.Tables = New-Object 'System.Collections.Generic.List[TableInfo]'
+            $databaseInfo.Tables.Add($child) | Out-Null
+            $databaseInfo.Tables.Add($parent) | Out-Null
+
+            $subsetTables = @(
+                [pscustomobject]@{ SchemaName = 'dbo'; TableName = 'Child' },
+                [pscustomobject]@{ SchemaName = 'dbo'; TableName = 'Parent' }
+            )
+
+            $ordered = @(Get-CopyDataFromSubsetForeignKeySafeOrder -SubsetTables $subsetTables -DatabaseInfo $databaseInfo)
+
+            $ordered[0].TableName | Should -Be 'Parent'
+            $ordered[1].TableName | Should -Be 'Child'
         }
     }
 }

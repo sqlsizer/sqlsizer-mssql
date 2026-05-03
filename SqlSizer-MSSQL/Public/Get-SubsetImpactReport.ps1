@@ -130,7 +130,7 @@ function Get-SubsetImpactReport
 
     $escapedSessionId = $SessionId.Replace("'", "''")
     $operationSummarySql = "SELECT
-            COUNT(*) AS TotalOperations,
+            COUNT_BIG(*) AS TotalOperations,
             SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END) AS CompletedOperations,
             ISNULL(SUM(ISNULL(Processed, 0)), 0) AS TotalRecordsProcessed,
             ISNULL(SUM(ToProcess - ISNULL(Processed, 0)), 0) AS TotalRecordsRemaining,
@@ -166,7 +166,7 @@ function Get-SubsetImpactReport
     $operationBreakdownSql = "SELECT
             [State],
             [Depth],
-            COUNT(*) AS OperationCount,
+            COUNT_BIG(*) AS OperationCount,
             ISNULL(SUM(ToProcess), 0) AS RecordsToProcess,
             ISNULL(SUM(ISNULL(Processed, 0)), 0) AS RecordsProcessed,
             ISNULL(SUM(ToProcess - ISNULL(Processed, 0)), 0) AS RecordsRemaining

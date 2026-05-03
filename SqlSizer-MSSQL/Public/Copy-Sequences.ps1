@@ -16,10 +16,13 @@ function Copy-Sequences
     Write-Progress -Activity "Copying sequences" -PercentComplete 0
 
     $sql = "SELECT
+    SCHEMA_NAME(seq.schema_id) as [schema],
 	seq.name,
 	seq.current_value,
 	seq.increment,
-	ISNULL(seq.maximum_value, 2147483647) as maximum_value, -- todo
+	seq.minimum_value,
+	seq.maximum_value,
+    seq.is_cycling,
 	t.[name] as [type]
     FROM
         sys.sequences seq
@@ -30,7 +33,21 @@ function Copy-Sequences
 
     foreach ($row in $sequencesRows)
     {
-        $sql = "IF NOT EXISTS(SELECT * FROM sys.objects WHERE object_id = OBJECT_ID('$($row["name"])') AND type = 'SO') BEGIN CREATE SEQUENCE [$($row["name"])] AS $($row["type"])  START WITH $($row["current_value"]) INCREMENT BY $($row["increment"]) MAXVALUE $($row["maximum_value"]) END"
+        $schema = $row["schema"]
+        $name = $row["name"]
+        $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        if ($schemaExists -eq $false)
+        {
+            $tmp = "CREATE SCHEMA $(ConvertTo-SqlIdentifier $schema)"
+            Invoke-SqlcmdEx -Sql $tmp -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
+        }
+
+        $minimum = if ($null -eq $row["minimum_value"]) { "NO MINVALUE" } else { "MINVALUE $($row["minimum_value"])" }
+        $maximum = if ($null -eq $row["maximum_value"]) { "NO MAXVALUE" } else { "MAXVALUE $($row["maximum_value"])" }
+        $cycle = if ([bool]$row["is_cycling"]) { "CYCLE" } else { "NO CYCLE" }
+        $qualifiedName = "$(ConvertTo-SqlIdentifier $schema).$(ConvertTo-SqlIdentifier $name)"
+        $qualifiedLiteral = ConvertTo-SqlStringLiteral "$schema.$name"
+        $sql = "IF OBJECT_ID($qualifiedLiteral, 'SO') IS NULL BEGIN CREATE SEQUENCE $qualifiedName AS $($row["type"]) START WITH $($row["current_value"]) INCREMENT BY $($row["increment"]) $minimum $maximum $cycle END"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
     }
     Write-Progress -Activity "Copying sequences" -Completed

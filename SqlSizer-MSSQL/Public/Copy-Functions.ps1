@@ -15,7 +15,11 @@ function Copy-Functions
 
     Write-Progress -Activity "Copy functions" -PercentComplete 0
 
-    $sql = "select r.ROUTINE_SCHEMA as [schema], r.ROUTINE_DEFINITION as definition from [INFORMATION_SCHEMA].[ROUTINES] r WHERE r.ROUTINE_DEFINITION IS NOT NULL AND r.ROUTINE_TYPE ='FUNCTION'"
+    $sql = "SELECT s.name as [schema], OBJECT_DEFINITION(o.object_id) as definition
+    FROM sys.objects o
+    INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+    WHERE o.type IN ('FN', 'IF', 'TF', 'FS', 'FT')
+        AND OBJECT_DEFINITION(o.object_id) IS NOT NULL"
     $rows = Invoke-SqlcmdEx -Sql $sql -Database $SourceDatabase -ConnectionInfo $ConnectionInfo
 
     foreach ($row in $rows)
@@ -25,7 +29,7 @@ function Copy-Functions
         $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
         if ($schemaExists -eq $false)
         {
-            $tmp = "CREATE SCHEMA $schema"
+            $tmp = "CREATE SCHEMA $(ConvertTo-SqlIdentifier $schema)"
             Invoke-SqlcmdEx -Sql $tmp -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
         }
 

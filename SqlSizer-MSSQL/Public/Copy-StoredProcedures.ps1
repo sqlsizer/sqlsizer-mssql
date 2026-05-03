@@ -28,7 +28,7 @@ function Copy-StoredProcedures
         $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
         if ($schemaExists -eq $false)
         {
-            $tmp = "CREATE SCHEMA $schema"
+            $tmp = "CREATE SCHEMA $(ConvertTo-SqlIdentifier $schema)"
             Invoke-SqlcmdEx -Sql $tmp -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
         }
 

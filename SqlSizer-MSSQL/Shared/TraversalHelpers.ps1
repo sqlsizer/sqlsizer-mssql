@@ -507,7 +507,7 @@ function Get-AdditionalWhereConditions
         [hashtable]$Constraints,
         
         [Parameter(Mandatory = $true)]
-        [int]$FkId,
+        [long]$FkId,
         
         [Parameter(Mandatory = $true)]
         [bool]$FullSearch

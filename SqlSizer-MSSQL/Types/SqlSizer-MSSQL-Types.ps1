@@ -284,8 +284,8 @@ class Structure
 
 class TraversalOperation
 {
-    [int]$Id
-    [int]$TableId
+    [long]$Id
+    [long]$TableId
     [string]$TableSchema
     [string]$TableName
     [TraversalState]$State
@@ -294,8 +294,8 @@ class TraversalOperation
     [long]$RecordsProcessed
     [int]$Iteration
     [bool]$IsCompleted
-    [int]$SourceTableId
-    [int]$ForeignKeyId
+    [long]$SourceTableId
+    [long]$ForeignKeyId
     [DateTime]$CreatedDate
     [DateTime]$ProcessedDate
     

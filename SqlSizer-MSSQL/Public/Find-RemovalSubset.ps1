@@ -256,7 +256,7 @@ SELECT $(0..($fkPrimaryKey.Count - 1) | ForEach-Object { "Key$_" } | Join-String
 FROM NewRecords;
 
 -- Record operation
-DECLARE @RowCount INT = @@ROWCOUNT;
+DECLARE @RowCount bigint = @@ROWCOUNT;
 "@
 
         $query += @"
@@ -392,7 +392,7 @@ ORDER BY o.[Depth] ASC, [Count] DESC;
         #>
         param
         (
-            [int]$TableId,
+            [long]$TableId,
             [int]$Color,
             [int]$Depth
         )

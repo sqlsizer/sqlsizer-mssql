@@ -43,9 +43,24 @@ function Install-SqlSizerExportViews
             continue
         }
 
-        $sql = "CREATE VIEW SqlSizer_$($SessionId).Export_$($table.SchemaName)_$($table.TableName) AS SELECT ROW_NUMBER() OVER(ORDER BY (SELECT NULL)) AS SqlSizer_RowSequence, $tableSelect from $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
+        $rowOrderBy = GetExportViewsPrimaryKeyOrderBy -TableInfo $table
+        $sql = "CREATE VIEW SqlSizer_$($SessionId).Export_$($table.SchemaName)_$($table.TableName) AS SELECT ROW_NUMBER() OVER(ORDER BY $rowOrderBy) AS SqlSizer_RowSequence, $tableSelect from $($table.SchemaName).$($table.TableName) t INNER JOIN $join"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
     }
+}
+
+function GetExportViewsPrimaryKeyOrderBy
+{
+    param (
+        [TableInfo]$TableInfo
+    )
+
+    $columns = foreach ($column in $TableInfo.PrimaryKey)
+    {
+        "t.$(ConvertTo-SqlIdentifier $column.Name) ASC"
+    }
+
+    return [string]::Join(', ', $columns)
 }
 
 function GetExportViewsTableJoin
@@ -72,7 +87,7 @@ function GetExportViewsTableJoin
     foreach ($column in $primaryKey)
     {
         $select += "p.Key$i"
-        $join += "t.$column = rr.Key$i"
+        $join += "t.$(ConvertTo-SqlIdentifier $column.Name) = rr.Key$i"
         $i = $i + 1
     }
 

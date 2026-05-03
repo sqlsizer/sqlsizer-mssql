@@ -48,9 +48,6 @@ if ((New-EmptyCompactDatabase -Database $database -NewDatabase $newDatabase -Con
     return
 }
 
-Disable-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
-Disable-AllTablesTriggers -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
-$files = Copy-SubsetToDatabaseFileSet -SourceDatabase $database -TargetDatabase $newDatabase -DatabaseInfo $info -ConnectionInfo $connection -Secure $false -SessionId $sessionId
-Import-SubsetFromFileSet -SourceDatabase $newDatabase -TargetDatabase $newDatabase -DatabaseInfo $info -ConnectionInfo $connection -Files $files
-Enable-ForeignKeys -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
-Enable-AllTablesTriggers -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
+Copy-DataFromSubset -Source $database -Destination $newDatabase -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId -BatchSize 100000
+Format-Indexes -Database $newDatabase -ConnectionInfo $connection -DatabaseInfo $info
+Compress-Database -Database $newDatabase -ConnectionInfo $connection

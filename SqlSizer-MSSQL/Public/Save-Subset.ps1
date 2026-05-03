@@ -44,7 +44,7 @@ function Save-Subset
 
             $keysStr = [string]::Join(',', $keys)
 
-            $sql = "CREATE TABLE SqlSizerHistory.SubsetTableRow_$($table.PrimaryKeySize) ([Id] int primary key identity(1,1), $keysStr, [Hash] varbinary(8000), [TableId] int NOT NULL)"
+            $sql = "CREATE TABLE SqlSizerHistory.SubsetTableRow_$($table.PrimaryKeySize) ([Id] bigint primary key identity(1,1), $keysStr, [Hash] varbinary(8000), [TableId] bigint NOT NULL)"
             $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
 
             $sql = "ALTER TABLE SqlSizerHistory.SubsetTableRow_$($table.PrimaryKeySize) ADD CONSTRAINT SubsetTableRow_$($table.PrimaryKeySize)_TableId FOREIGN KEY (TableId) REFERENCES SqlSizerHistory.SubsetTable([Id]) ON DELETE CASCADE"

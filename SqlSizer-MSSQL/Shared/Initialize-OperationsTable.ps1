@@ -52,7 +52,7 @@ function Initialize-OperationsTable
         $tableId = $sqlSizerTable.Id
 
         $sql = "INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [State], [Depth], [Created], [SessionId], [FoundIteration])
-        SELECT $tableId, COUNT(*), 0, NULL, p.[State], 0, GETDATE(), '$SessionId', $StartIteration
+        SELECT $tableId, COUNT_BIG(*), 0, NULL, p.[State], 0, GETDATE(), '$SessionId', $StartIteration
         FROM $($processing) p
         WHERE p.Iteration >= $StartIteration
         GROUP BY [State]"
