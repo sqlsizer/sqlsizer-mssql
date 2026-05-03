@@ -76,5 +76,44 @@ Describe 'New-EmptyCompactDatabase SQL helpers' {
 
             Get-CompactDatabaseForeignKeyRuleSql -ForeignKey $fk | Should -Be ' ON DELETE CASCADE ON UPDATE SET NULL'
         }
+
+        It 'Requests full-length query results so XML schema collections are not truncated' {
+            $script:invokeSqlcmdParameters = $null
+            function Invoke-Sqlcmd {
+                [cmdletbinding()]
+                param(
+                    [string]$Query,
+                    [string]$ServerInstance,
+                    [string]$Database,
+                    [int]$QueryTimeout,
+                    [string]$Encrypt,
+                    [switch]$TrustServerCertificate,
+                    [int]$MaxCharLength,
+                    [int]$MaxBinaryLength
+                )
+
+                $script:invokeSqlcmdParameters = $PSBoundParameters
+                return [pscustomobject]@{ Value = 'ok' }
+            }
+
+            try {
+                $connection = New-Object SqlConnectionInfo
+                $connection.Server = '.'
+                $connection.EncryptConnection = $false
+
+                $null = Invoke-SqlcmdEx `
+                    -Sql 'SELECT 1 AS Value' `
+                    -Database 'master' `
+                    -ConnectionInfo $connection `
+                    -Statistics $false
+
+                $script:invokeSqlcmdParameters.MaxCharLength | Should -Be ([int]::MaxValue)
+                $script:invokeSqlcmdParameters.MaxBinaryLength | Should -Be ([int]::MaxValue)
+            }
+            finally {
+                Remove-Item -Path Function:\Invoke-Sqlcmd -ErrorAction SilentlyContinue
+                Remove-Variable -Scope Script -Name invokeSqlcmdParameters -ErrorAction SilentlyContinue
+            }
+        }
     }
 }

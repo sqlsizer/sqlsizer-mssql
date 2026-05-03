@@ -1,5 +1,9 @@
 ## Example that shows how to create a table from subset table
 
+# Load the local module manifest so SqlSizer classes/enums are available to this script.
+$modulePath = Join-Path $PSScriptRoot "..\..\..\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1"
+Import-Module $modulePath -Force -Global
+
 # Connection settings
 $server = "localhost"
 $database = "AdventureWorks2019"

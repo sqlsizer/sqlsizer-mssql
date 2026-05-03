@@ -1,6 +1,10 @@
 ## Example that shows how to run two phase search
 ## Use case: Remove some GDPR data (e.g. Person.Address data for people with last name 'Adams')
 
+# Load the local module manifest so SqlSizer classes/enums are available to this script.
+$modulePath = Join-Path $PSScriptRoot "..\..\..\SqlSizer-MSSQL\SqlSizer-MSSQL.psd1"
+Import-Module $modulePath -Force -Global
+
 # Connection settings
 $server = "localhost"
 $database = "AdventureWorks2019"

@@ -47,6 +47,14 @@ function Invoke-SqlcmdEx
             }
         }
 
+        if ($sqlcmdInfo.Parameters.ContainsKey('MaxCharLength')) {
+            $params.MaxCharLength = [int]::MaxValue
+        }
+
+        if ($sqlcmdInfo.Parameters.ContainsKey('MaxBinaryLength')) {
+            $params.MaxBinaryLength = [int]::MaxValue
+        }
+
         if (($null -ne $ConnectionInfo.AccessToken) -and ($ConnectionInfo.AccessToken -ne ""))
         {
             $params.AccessToken = $ConnectionInfo.AccessToken
