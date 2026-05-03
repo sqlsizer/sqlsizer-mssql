@@ -273,9 +273,17 @@ function Find-Subset
         # O(1) lookup using hashtable instead of Where-Object
         $table = $tablesByFullName["$($Operation.TableSchema), $($Operation.TableName)"]
 
+        $progressPercent = Get-FindSubsetProgressPercent -Statistics $progressStats
+        $progressStatus = Get-FindSubsetProgressStatus `
+            -Statistics $progressStats `
+            -Iteration $Iteration `
+            -ElapsedTime ((Get-Date) - $startTime)
+        $progressOperation = Get-FindSubsetProgressCurrentOperation -Table $table -Operation $Operation
+
         Write-Progress -Activity "Finding subset $SessionId" `
-                       -CurrentOperation "$($table.SchemaName).$($table.TableName) - State: $($Operation.State)" `
-                       -PercentComplete $percentComplete
+                       -Status $progressStatus `
+                       -CurrentOperation $progressOperation `
+                       -PercentComplete ([int][Math]::Round($progressPercent))
 
         # Check which directions to traverse
         $traverseOutgoing = Test-ShouldTraverseDirection -State $Operation.State -Direction ([TraversalDirection]::Outgoing) -FullSearch $FullSearch
@@ -456,12 +464,12 @@ function Find-Subset
         $result = Invoke-SqlcmdEx -Sql $query -Database $Database -ConnectionInfo $ConnectionInfo
 
         $stats = [TraversalStatistics]::new()
-        $stats.TotalOperations = $result.TotalOperations
-        $stats.CompletedOperations = $result.CompletedOperations
-        $stats.TotalRecordsProcessed = $result.TotalRecordsProcessed
-        $stats.TotalRecordsRemaining = $result.TotalRecordsRemaining
+        $stats.TotalOperations = ConvertTo-FindSubsetProgressLong -Value $result.TotalOperations
+        $stats.CompletedOperations = ConvertTo-FindSubsetProgressLong -Value $result.CompletedOperations
+        $stats.TotalRecordsProcessed = ConvertTo-FindSubsetProgressLong -Value $result.TotalRecordsProcessed
+        $stats.TotalRecordsRemaining = ConvertTo-FindSubsetProgressLong -Value $result.TotalRecordsRemaining
         $stats.CurrentIteration = $Iteration
-        $stats.MaxDepthReached = $result.MaxDepthReached
+        $stats.MaxDepthReached = [int](ConvertTo-FindSubsetProgressLong -Value $result.MaxDepthReached)
         $stats.ElapsedTime = (Get-Date) - $StartTime
 
         return $stats
@@ -626,17 +634,29 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
         $startTime = Get-Date
         $iteration = $StartIteration + 1
-        $percentComplete = 0
+        $progressRefreshInterval = 5
+        $progressStats = Get-IterationStatistics -Iteration $StartIteration -StartTime $startTime
 
         do
         {
             $hasMoreWork = Invoke-SearchIteration -Iteration $iteration
 
+            $refreshedProgressStats = $false
+            if (($iteration % $progressRefreshInterval) -eq 0)
+            {
+                $progressStats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
+                $refreshedProgressStats = $true
+            }
+
             # Update progress and checkpoint
             if (($iteration % $CheckpointInterval) -eq 0)
             {
-                $stats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
-                $percentComplete = $stats.PercentComplete()
+                if (-not $refreshedProgressStats)
+                {
+                    $progressStats = Get-IterationStatistics -Iteration $iteration -StartTime $startTime
+                }
+
+                $stats = $progressStats
                 Write-Verbose $stats.ToString()
 
                 if ($CheckpointPath)
@@ -729,7 +749,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             Write-Verbose "Traversal completed. Final checkpoint saved to $CheckpointPath"
         }
 
-        Write-Progress -Activity "Finding subset" -Completed
+        Write-Progress -Activity "Finding subset $SessionId" -Completed
 
         return [pscustomobject]@{
             Finished            = $true
@@ -772,7 +792,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         else
         {
             $startTime = Get-Date
-            $percentComplete = 0
+            $progressStats = Get-IterationStatistics -Iteration $Iteration -StartTime $startTime
             $hasMoreWork = Invoke-SearchIteration -Iteration $Iteration
 
             # Resolve Pending states when traversal is complete
@@ -805,4 +825,137 @@ WHERE Status = 0 AND SessionId = '$SessionId';
     }
 
     #endregion
+}
+
+function ConvertTo-FindSubsetProgressLong
+{
+    [cmdletbinding()]
+    [outputtype([long])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value,
+
+        [Parameter(Mandatory = $false)]
+        [long]$DefaultValue = 0
+    )
+
+    if ($null -eq $Value -or $Value -is [System.DBNull])
+    {
+        return $DefaultValue
+    }
+
+    return [Convert]::ToInt64($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Format-FindSubsetProgressNumber
+{
+    [cmdletbinding()]
+    [outputtype([string])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    return (ConvertTo-FindSubsetProgressLong -Value $Value).ToString("N0", $culture)
+}
+
+function Format-FindSubsetProgressElapsedTime
+{
+    [cmdletbinding()]
+    [outputtype([string])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [TimeSpan]$ElapsedTime = [TimeSpan]::Zero
+    )
+
+    if ($ElapsedTime -lt [TimeSpan]::Zero)
+    {
+        $ElapsedTime = [TimeSpan]::Zero
+    }
+
+    $hours = [Math]::Floor($ElapsedTime.TotalHours)
+    return "{0:00}:{1:00}:{2:00}" -f $hours, $ElapsedTime.Minutes, $ElapsedTime.Seconds
+}
+
+function Get-FindSubsetProgressPercent
+{
+    [cmdletbinding()]
+    [outputtype([double])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [TraversalStatistics]$Statistics
+    )
+
+    if ($null -eq $Statistics)
+    {
+        return 0.0
+    }
+
+    $percent = $Statistics.PercentComplete()
+    if ($percent -lt 0) { return 0.0 }
+    if ($percent -gt 100) { return 100.0 }
+    return $percent
+}
+
+function Get-FindSubsetProgressStatus
+{
+    [cmdletbinding()]
+    [outputtype([string])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [TraversalStatistics]$Statistics,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Iteration,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [TimeSpan]$ElapsedTime = [TimeSpan]::Zero
+    )
+
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $percent = (Get-FindSubsetProgressPercent -Statistics $Statistics).ToString("0.##", $culture)
+    $elapsed = Format-FindSubsetProgressElapsedTime -ElapsedTime $ElapsedTime
+
+    $processed = 0
+    $remaining = 0
+    $completedOperations = 0
+    $totalOperations = 0
+
+    if ($null -ne $Statistics)
+    {
+        $processed = $Statistics.TotalRecordsProcessed
+        $remaining = $Statistics.TotalRecordsRemaining
+        $completedOperations = $Statistics.CompletedOperations
+        $totalOperations = $Statistics.TotalOperations
+    }
+
+    return "$percent% | elapsed $elapsed | records $(Format-FindSubsetProgressNumber $processed) processed / $(Format-FindSubsetProgressNumber $remaining) remaining | ops $(Format-FindSubsetProgressNumber $completedOperations)/$(Format-FindSubsetProgressNumber $totalOperations) | iteration $Iteration"
+}
+
+function Get-FindSubsetProgressCurrentOperation
+{
+    [cmdletbinding()]
+    [outputtype([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [TableInfo]$Table,
+
+        [Parameter(Mandatory = $true)]
+        [TraversalOperation]$Operation
+    )
+
+    return "$($Table.SchemaName).$($Table.TableName) | state $($Operation.State) | depth $($Operation.Depth) | operation records $(Format-FindSubsetProgressNumber $Operation.RecordsToProcess)"
 }
