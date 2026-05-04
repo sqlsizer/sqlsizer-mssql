@@ -113,6 +113,25 @@ The guard is warn-only by default. Results include a `SubsetSizeGuard` object wi
 
 ---
 
+### Find-Subset Performance Profiling
+
+Enable the opt-in profile only while diagnosing slow traversal runs:
+
+```powershell
+$result = Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+    -CollectPerformanceProfile $true `
+    -CollectSqlStatistics $true
+
+$result.PerformanceProfile.Summary
+$result.PerformanceProfile.ByPhase | Sort-Object TotalElapsedMs -Descending | Format-Table
+$result.PerformanceProfile.PowerShellBuildHotspots |
+    Format-Table Phase, Table, Direction, ElapsedMs, FksScanned, FksEmitted, GeneratedQueryCount
+```
+
+`CollectPerformanceProfile` reports SQL phases and PowerShell traversal-SQL build hotspots. `CollectSqlStatistics` adds logical-read totals, which helps distinguish slow query plans from slow traversal-query construction.
+
+---
+
 ## Traversal Configuration
 
 Customize behavior per table with `TraversalConfiguration`:

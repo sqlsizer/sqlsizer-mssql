@@ -1851,6 +1851,24 @@ The internal `Invoke-SqlcmdEx` function handles Azure transparently:
 | Long-running traversals | Enable checkpointing with `-CheckpointPath` |
 | High-fanout tables | Use `TraversalConfiguration` with `MaxDepth` or `Top` limits |
 
+### Profiling Slow Find-Subset Runs
+
+Use `CollectPerformanceProfile` when a real database traversal is slow and you need to separate SQL execution time from PowerShell traversal-query construction:
+
+```powershell
+$result = Find-Subset -Database $db -SessionId $sessionId `
+    -DatabaseInfo $info -ConnectionInfo $connection `
+    -CollectPerformanceProfile $true `
+    -CollectSqlStatistics $true
+
+$result.PerformanceProfile.Summary
+$result.PerformanceProfile.ByPhase | Sort-Object TotalElapsedMs -Descending | Format-Table
+$result.PerformanceProfile.PowerShellBuildHotspots |
+    Format-Table Phase, Table, Direction, ElapsedMs, FksScanned, FksEmitted, GeneratedQueryCount
+```
+
+The profile includes `Summary`, `ByPhase`, `SlowestCalls`, and `PowerShellBuildHotspots`. Traversal build samples include relationship/FK scan counters, ignored-table checks, generated query count, SQL text size, and rule-branch timing.
+
 ### Index Recommendations
 
 ```powershell

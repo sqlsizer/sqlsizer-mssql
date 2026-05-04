@@ -46,6 +46,10 @@
     Collect SQL Server logical-read statistics during traversal. Disabled by default because
     STATISTICS IO adds measurable overhead to large traversal runs. Enable when profiling.
 
+.PARAMETER CollectPerformanceProfile
+    Collect per-phase SQL and PowerShell traversal-building timings. Disabled by default
+    because profiling adds overhead. When enabled, the result includes PerformanceProfile.
+
 .PARAMETER ProgressRefreshInterval
     How often (in iterations) to refresh aggregate progress statistics. Default: 5.
 
@@ -63,7 +67,305 @@
     # Resume after crash
     Find-Subset -Database "MyDB" -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
         -CheckpointPath "C:\temp\subset_checkpoint.json" -Resume
+
+.EXAMPLE
+    # Collect phase timings and SQL logical reads while investigating a slow traversal
+    $result = Find-Subset -Database "MyDB" -SessionId $sid -DatabaseInfo $info -ConnectionInfo $conn `
+        -CollectPerformanceProfile $true -CollectSqlStatistics $true
+    $result.PerformanceProfile.ByPhase | Sort-Object TotalElapsedMs -Descending | Format-Table
 #>
+
+function Get-FindSubsetPerformanceSampleValue
+{
+    [cmdletbinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [object]$Sample,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [object]$DefaultValue = 0
+    )
+
+    if ($null -eq $Sample)
+    {
+        return $DefaultValue
+    }
+
+    $property = $Sample.PSObject.Properties[$Name]
+    if (($null -eq $property) -or ($null -eq $property.Value) -or ($property.Value -is [System.DBNull]))
+    {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
+function ConvertTo-FindSubsetPerformanceLong
+{
+    [cmdletbinding()]
+    [outputtype([long])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if (($null -eq $Value) -or ($Value -is [System.DBNull]))
+    {
+        return 0
+    }
+
+    return [Convert]::ToInt64($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-FindSubsetPerformanceDouble
+{
+    [cmdletbinding()]
+    [outputtype([double])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if (($null -eq $Value) -or ($Value -is [System.DBNull]))
+    {
+        return 0.0
+    }
+
+    return [Convert]::ToDouble($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function New-FindSubsetPerformanceProfileCall
+{
+    [cmdletbinding()]
+    [outputtype([pscustomobject])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [object]$Sample
+    )
+
+    return [pscustomobject]@{
+        Category             = Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Category' -DefaultValue ''
+        Phase                = Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Phase' -DefaultValue ''
+        Iteration            = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Iteration' -DefaultValue 0)
+        Table                = Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Table' -DefaultValue ''
+        State                = Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'State' -DefaultValue ''
+        Depth                = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Depth' -DefaultValue 0)
+        Direction            = Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'Direction' -DefaultValue ''
+        ElapsedMs            = [Math]::Round((ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'ElapsedMs' -DefaultValue 0)), 2)
+        LogicalReads         = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'LogicalReads' -DefaultValue 0)
+        SqlChars             = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'SqlChars' -DefaultValue 0)
+        RelationshipsVisited = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'RelationshipsVisited' -DefaultValue 0)
+        FksScanned           = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'FksScanned' -DefaultValue 0)
+        FksEmitted           = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'FksEmitted' -DefaultValue 0)
+        IgnoredChecks        = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'IgnoredChecks' -DefaultValue 0)
+        GeneratedQueryCount  = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'GeneratedQueryCount' -DefaultValue 0)
+        RuleBranchCalls      = ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'RuleBranchCalls' -DefaultValue 0)
+        RuleBranchElapsedMs  = [Math]::Round((ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $Sample -Name 'RuleBranchElapsedMs' -DefaultValue 0)), 2)
+    }
+}
+
+function ConvertTo-FindSubsetPerformanceProfile
+{
+    [cmdletbinding()]
+    [outputtype([pscustomobject])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [object[]]$Samples = @()
+    )
+
+    $samplesArray = @($Samples)
+    $totalElapsedMs = [double]0
+    $sqlElapsedMs = [double]0
+    $powerShellElapsedMs = [double]0
+    $logicalReads = [long]0
+    $sqlChars = [long]0
+    $sqlCalls = [long]0
+    $powerShellCalls = [long]0
+
+    foreach ($sample in $samplesArray)
+    {
+        $elapsed = ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $sample -Name 'ElapsedMs' -DefaultValue 0)
+        $category = Get-FindSubsetPerformanceSampleValue -Sample $sample -Name 'Category' -DefaultValue ''
+        $totalElapsedMs += $elapsed
+        $logicalReads += ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $sample -Name 'LogicalReads' -DefaultValue 0)
+        $sqlChars += ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $sample -Name 'SqlChars' -DefaultValue 0)
+
+        if ($category -eq 'SQL')
+        {
+            $sqlCalls += 1
+            $sqlElapsedMs += $elapsed
+        }
+        elseif ($category -eq 'PowerShell')
+        {
+            $powerShellCalls += 1
+            $powerShellElapsedMs += $elapsed
+        }
+    }
+
+    $phaseGroups = $samplesArray | Group-Object -Property Category, Phase -AsHashTable -AsString
+    if ($null -eq $phaseGroups)
+    {
+        $phaseGroups = @{}
+    }
+
+    $byPhase = @(
+        foreach ($group in $phaseGroups.GetEnumerator())
+        {
+            $groupSamples = @($group.Value)
+            if ($groupSamples.Count -eq 0)
+            {
+                continue
+            }
+
+            $first = $groupSamples[0]
+            $elapsedValues = @($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'ElapsedMs' -DefaultValue 0) })
+            $elapsedTotal = ($elapsedValues | Measure-Object -Sum).Sum
+            if ($null -eq $elapsedTotal) { $elapsedTotal = 0 }
+
+            [pscustomobject]@{
+                Category             = Get-FindSubsetPerformanceSampleValue -Sample $first -Name 'Category' -DefaultValue ''
+                Phase                = Get-FindSubsetPerformanceSampleValue -Sample $first -Name 'Phase' -DefaultValue ''
+                CallCount            = [int]$groupSamples.Count
+                TotalElapsedMs       = [Math]::Round([double]$elapsedTotal, 2)
+                AverageElapsedMs     = [Math]::Round(([double]$elapsedTotal / [Math]::Max(1, $groupSamples.Count)), 2)
+                MaxElapsedMs         = [Math]::Round([double](($elapsedValues | Measure-Object -Maximum).Maximum), 2)
+                TotalLogicalReads    = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'LogicalReads' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                TotalSqlChars        = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'SqlChars' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                RelationshipsVisited = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'RelationshipsVisited' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                FksScanned           = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'FksScanned' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                FksEmitted           = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'FksEmitted' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                IgnoredChecks        = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'IgnoredChecks' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                GeneratedQueryCount  = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'GeneratedQueryCount' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                RuleBranchCalls      = [long](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceLong (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'RuleBranchCalls' -DefaultValue 0) } | Measure-Object -Sum).Sum)
+                RuleBranchElapsedMs  = [Math]::Round([double](($groupSamples | ForEach-Object { ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'RuleBranchElapsedMs' -DefaultValue 0) } | Measure-Object -Sum).Sum), 2)
+            }
+        }
+    ) | Sort-Object TotalElapsedMs -Descending
+
+    return [pscustomobject]@{
+        Summary                = [pscustomobject]@{
+            TotalCalls               = [int]$samplesArray.Count
+            TotalElapsedMs           = [Math]::Round($totalElapsedMs, 2)
+            SqlCallCount             = [int]$sqlCalls
+            SqlElapsedMs             = [Math]::Round($sqlElapsedMs, 2)
+            PowerShellCallCount      = [int]$powerShellCalls
+            PowerShellElapsedMs      = [Math]::Round($powerShellElapsedMs, 2)
+            TotalLogicalReads        = $logicalReads
+            TotalSqlChars            = $sqlChars
+        }
+        ByPhase                = @($byPhase)
+        SlowestCalls           = @($samplesArray | Sort-Object { ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'ElapsedMs' -DefaultValue 0) } -Descending | Select-Object -First 20 | ForEach-Object { New-FindSubsetPerformanceProfileCall -Sample $_ })
+        PowerShellBuildHotspots = @($samplesArray | Where-Object { (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'Category' -DefaultValue '') -eq 'PowerShell' } | Sort-Object { ConvertTo-FindSubsetPerformanceDouble (Get-FindSubsetPerformanceSampleValue -Sample $_ -Name 'ElapsedMs' -DefaultValue 0) } -Descending | Select-Object -First 20 | ForEach-Object { New-FindSubsetPerformanceProfileCall -Sample $_ })
+    }
+}
+
+function New-FindSubsetResultObject
+{
+    [cmdletbinding()]
+    [outputtype([pscustomobject])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [bool]$Finished,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$Initialized,
+
+        [Parameter(Mandatory = $true)]
+        [int]$CompletedIterations,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$SubsetSizeGuard,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$IncludePerformanceProfile = $false,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$PerformanceProfile = $null
+    )
+
+    $result = [ordered]@{
+        Finished            = $Finished
+        Initialized         = $Initialized
+        CompletedIterations = $CompletedIterations
+        SubsetSizeGuard     = $SubsetSizeGuard
+    }
+
+    if ($IncludePerformanceProfile)
+    {
+        $result.PerformanceProfile = $PerformanceProfile
+    }
+
+    return [pscustomobject]$result
+}
+
+function New-FindSubsetIgnoredTableKeySet
+{
+    [cmdletbinding()]
+    [outputtype([System.Collections.Generic.HashSet[string]])]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [TableInfo2[]]$Tables
+    )
+
+    $keys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($table in @($Tables))
+    {
+        if (($null -ne $table) -and (-not [string]::IsNullOrWhiteSpace($table.SchemaName)) -and (-not [string]::IsNullOrWhiteSpace($table.TableName)))
+        {
+            $null = $keys.Add("$($table.SchemaName), $($table.TableName)")
+        }
+    }
+
+    return ,$keys
+}
+
+function New-FindSubsetIncomingForeignKeyLookup
+{
+    [cmdletbinding()]
+    [outputtype([hashtable])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [DatabaseInfo]$DatabaseInfo
+    )
+
+    $lookup = @{}
+    foreach ($table in @($DatabaseInfo.Tables))
+    {
+        foreach ($fk in @($table.ForeignKeys))
+        {
+            if ($null -eq $fk)
+            {
+                continue
+            }
+
+            $targetKey = "$($fk.Schema), $($fk.Table)"
+            if (-not $lookup.ContainsKey($targetKey))
+            {
+                $lookup[$targetKey] = [System.Collections.Generic.List[TableFk]]::new()
+            }
+
+            $lookup[$targetKey].Add($fk)
+        }
+    }
+
+    return $lookup
+}
 
 function Find-Subset
 {
@@ -129,6 +431,9 @@ function Find-Subset
         [bool]$CollectSqlStatistics = $false,
 
         [Parameter(Mandatory = $false)]
+        [bool]$CollectPerformanceProfile = $false,
+
+        [Parameter(Mandatory = $false)]
         [int]$ProgressRefreshInterval = 5,
 
         [Parameter(Mandatory = $false)]
@@ -155,6 +460,27 @@ function Find-Subset
         throw "ProgressRefreshInterval must be greater than or equal to 1."
     }
 
+    $performanceSamples = [System.Collections.Generic.List[object]]::new()
+
+    $ignoredTableKeys = New-FindSubsetIgnoredTableKeySet -Tables $IgnoredTables
+
+    $configurationIgnoredTableKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $TraversalConfiguration)
+    {
+        $configurationIgnoredTableKeys = New-FindSubsetIgnoredTableKeySet -Tables $TraversalConfiguration.IgnoredTables
+    }
+
+    $userTablesWithPrimaryKey = [System.Collections.Generic.List[TableInfo]]::new()
+    foreach ($table in @($DatabaseInfo.Tables))
+    {
+        if (($null -ne $table.PrimaryKey) -and ($table.PrimaryKey.Count -gt 0) -and (-not $table.SchemaName.StartsWith('SqlSizer')))
+        {
+            $null = $userTablesWithPrimaryKey.Add($table)
+        }
+    }
+
+    $incomingFksByTarget = New-FindSubsetIncomingForeignKeyLookup -DatabaseInfo $DatabaseInfo
+
     # O(1) table lookup hashtable - built at initialization
     $tablesByFullName = @{}
     foreach ($t in $DatabaseInfo.Tables) {
@@ -162,6 +488,198 @@ function Find-Subset
     }
     
     #region Helper Functions
+
+    function Test-FindSubsetIgnoredTable
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [string]$SchemaName,
+
+            [Parameter(Mandatory = $true)]
+            [string]$TableName
+        )
+
+        $key = "$SchemaName, $TableName"
+        return $ignoredTableKeys.Contains($key) -or $configurationIgnoredTableKeys.Contains($key)
+    }
+
+    function Add-FindSubsetPerformanceSample
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [string]$Category,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Phase,
+
+            [Parameter(Mandatory = $false)]
+            [int]$Iteration = 0,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TraversalOperation]$Operation = $null,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TableInfo]$Table = $null,
+
+            [Parameter(Mandatory = $false)]
+            [string]$Direction = "",
+
+            [Parameter(Mandatory = $false)]
+            [double]$ElapsedMs = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$LogicalReads = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$SqlChars = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$RelationshipsVisited = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$FksScanned = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$FksEmitted = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$IgnoredChecks = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$GeneratedQueryCount = 0,
+
+            [Parameter(Mandatory = $false)]
+            [long]$RuleBranchCalls = 0,
+
+            [Parameter(Mandatory = $false)]
+            [double]$RuleBranchElapsedMs = 0
+        )
+
+        if (-not $CollectPerformanceProfile)
+        {
+            return
+        }
+
+        $tableName = ""
+        if ($null -ne $Table)
+        {
+            $tableName = "$($Table.SchemaName).$($Table.TableName)"
+        }
+        elseif ($null -ne $Operation)
+        {
+            $tableName = "$($Operation.TableSchema).$($Operation.TableName)"
+        }
+
+        $state = ""
+        $depth = 0
+        if ($null -ne $Operation)
+        {
+            $state = $Operation.State.ToString()
+            $depth = $Operation.Depth
+        }
+
+        $performanceSamples.Add([pscustomobject]@{
+            Category             = $Category
+            Phase                = $Phase
+            Iteration            = $Iteration
+            Table                = $tableName
+            State                = $state
+            Depth                = $depth
+            Direction            = $Direction
+            ElapsedMs            = [Math]::Round($ElapsedMs, 2)
+            LogicalReads         = $LogicalReads
+            SqlChars             = $SqlChars
+            RelationshipsVisited = $RelationshipsVisited
+            FksScanned           = $FksScanned
+            FksEmitted           = $FksEmitted
+            IgnoredChecks        = $IgnoredChecks
+            GeneratedQueryCount  = $GeneratedQueryCount
+            RuleBranchCalls      = $RuleBranchCalls
+            RuleBranchElapsedMs  = [Math]::Round($RuleBranchElapsedMs, 2)
+        })
+    }
+
+    function Invoke-FindSubsetProfiledPowerShell
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [string]$Phase,
+
+            [Parameter(Mandatory = $true)]
+            [int]$Iteration,
+
+            [Parameter(Mandatory = $true)]
+            [scriptblock]$ScriptBlock,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TraversalOperation]$Operation = $null,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [TableInfo]$Table = $null
+        )
+
+        if (-not $CollectPerformanceProfile)
+        {
+            return & $ScriptBlock
+        }
+
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        try
+        {
+            return & $ScriptBlock
+        }
+        finally
+        {
+            $watch.Stop()
+            Add-FindSubsetPerformanceSample `
+                -Category 'PowerShell' `
+                -Phase $Phase `
+                -Iteration $Iteration `
+                -Operation $Operation `
+                -Table $Table `
+                -ElapsedMs $watch.Elapsed.TotalMilliseconds
+        }
+    }
+
+    function New-FindSubsetResult
+    {
+        param
+        (
+            [Parameter(Mandatory = $true)]
+            [bool]$Finished,
+
+            [Parameter(Mandatory = $true)]
+            [bool]$Initialized,
+
+            [Parameter(Mandatory = $true)]
+            [int]$CompletedIterations,
+
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [object]$SubsetSizeGuard
+        )
+
+        $profile = $null
+        if ($CollectPerformanceProfile)
+        {
+            $profile = ConvertTo-FindSubsetPerformanceProfile -Samples $performanceSamples.ToArray()
+        }
+
+        return New-FindSubsetResultObject `
+            -Finished $Finished `
+            -Initialized $Initialized `
+            -CompletedIterations $CompletedIterations `
+            -SubsetSizeGuard $SubsetSizeGuard `
+            -IncludePerformanceProfile $CollectPerformanceProfile `
+            -PerformanceProfile $profile
+    }
 
     function New-TraversalQuery
     {
@@ -178,41 +696,52 @@ function Find-Subset
             [TraversalState]$State,
             [TraversalDirection]$Direction,
             [TraversalConfiguration]$TraversalConfiguration,
+            [TraversalOperation]$Operation = $null,
             [int]$Iteration
         )
 
-        # Use List<string> instead of += for efficient string building
+        $buildWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $directionText = $Direction.ToString()
+        $relationshipsVisited = [long]0
+        $fksScanned = [long]0
+        $fksEmitted = [long]0
+        $ignoredChecks = [long]0
+        $generatedQueryCount = [long]0
+        $ruleBranchCalls = [long]0
+        $ruleBranchElapsedMs = [double]0
+        $generatedSql = ""
+
         $queryList = [System.Collections.Generic.List[string]]::new()
         $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
         $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
 
-        $relationships = if ($Direction -eq [TraversalDirection]::Outgoing) {
-            $Table.ForeignKeys
-        } else {
-            $Table.IsReferencedBy
-        }
-
-        foreach ($rel in $relationships)
+        try
         {
-            # For incoming, we need to iterate through FKs that point to current table
-            # For outgoing, $rel is already a single FK from $Table.ForeignKeys
             $fks = if ($Direction -eq [TraversalDirection]::Incoming) {
-                $rel.ForeignKeys | Where-Object { 
-                    ($_.Schema -eq $Table.SchemaName) -and ($_.Table -eq $Table.TableName) 
+                $relationshipsVisited = [long]$Table.IsReferencedBy.Count
+                $incomingKey = "$($Table.SchemaName), $($Table.TableName)"
+                if ($incomingFksByTarget.ContainsKey($incomingKey))
+                {
+                    @($incomingFksByTarget[$incomingKey])
+                }
+                else
+                {
+                    @()
                 }
             } else {
-                @($rel)  # Wrap single FK in array for consistent iteration
+                $relationshipsVisited = [long]$Table.ForeignKeys.Count
+                @($Table.ForeignKeys)
             }
+
+            $fksScanned = [long](@($fks).Count)
 
             foreach ($fk in $fks)
             {
                 $targetSchema = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Schema } else { $fk.FkSchema }
                 $targetTable = if ($Direction -eq [TraversalDirection]::Outgoing) { $fk.Table } else { $fk.FkTable }
 
-                # Skip ignored tables (from both separate parameter and TraversalConfiguration)
-                $isIgnoredFromParam = [TableInfo2]::IsIgnored($targetSchema, $targetTable, $IgnoredTables)
-                $isIgnoredFromConfig = $TraversalConfiguration -and [TableInfo2]::IsIgnored($targetSchema, $targetTable, $TraversalConfiguration.IgnoredTables)
-                if ($isIgnoredFromParam -or $isIgnoredFromConfig)
+                $ignoredChecks += 1
+                if (Test-FindSubsetIgnoredTable -SchemaName $targetSchema -TableName $targetTable)
                 {
                     continue
                 }
@@ -230,16 +759,27 @@ function Find-Subset
                 $targetProcessing = $structure.GetProcessingName($targetSignature, $SessionId)
                 $fkId = $fkGroupedByName["$($fk.FkSchema), $($fk.FkTable), $($fk.Name)"].Id
 
-                $branches = Get-TraversalRuleBranches `
-                    -Direction $Direction `
-                    -CurrentState $State `
-                    -Fk $fk `
-                    -SourceSchemaName $Table.SchemaName `
-                    -SourceTableName $Table.TableName `
-                    -ForeignKeyName $fk.Name `
-                    -TraversalConfiguration $TraversalConfiguration `
-                    -FullSearch $FullSearch
+                $branchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+                try
+                {
+                    $branches = Get-TraversalRuleBranches `
+                        -Direction $Direction `
+                        -CurrentState $State `
+                        -Fk $fk `
+                        -SourceSchemaName $Table.SchemaName `
+                        -SourceTableName $Table.TableName `
+                        -ForeignKeyName $fk.Name `
+                        -TraversalConfiguration $TraversalConfiguration `
+                        -FullSearch $FullSearch
+                }
+                finally
+                {
+                    $branchWatch.Stop()
+                    $ruleBranchCalls += 1
+                    $ruleBranchElapsedMs += $branchWatch.Elapsed.TotalMilliseconds
+                }
 
+                $emittedForFk = $false
                 foreach ($branch in $branches)
                 {
                     $newState = [TraversalState]$branch.NewState
@@ -267,11 +807,39 @@ function Find-Subset
                         -FullSearch $FullSearch
 
                     $queryList.Add($query)
+                    $generatedQueryCount += 1
+                    $emittedForFk = $true
+                }
+
+                if ($emittedForFk)
+                {
+                    $fksEmitted += 1
                 }
             }
-        }
 
-        return ($queryList -join "`n")
+            $generatedSql = ($queryList -join "`n")
+            return $generatedSql
+        }
+        finally
+        {
+            $buildWatch.Stop()
+            Add-FindSubsetPerformanceSample `
+                -Category 'PowerShell' `
+                -Phase "Building $directionText traversal SQL" `
+                -Iteration $Iteration `
+                -Operation $Operation `
+                -Table $Table `
+                -Direction $directionText `
+                -ElapsedMs $buildWatch.Elapsed.TotalMilliseconds `
+                -SqlChars $generatedSql.Length `
+                -RelationshipsVisited $relationshipsVisited `
+                -FksScanned $fksScanned `
+                -FksEmitted $fksEmitted `
+                -IgnoredChecks $ignoredChecks `
+                -GeneratedQueryCount $generatedQueryCount `
+                -RuleBranchCalls $ruleBranchCalls `
+                -RuleBranchElapsedMs $ruleBranchElapsedMs
+        }
     }
 
     function Invoke-TraversalOperation
@@ -310,6 +878,7 @@ function Find-Subset
                 -State $Operation.State `
                 -Direction ([TraversalDirection]::Outgoing) `
                 -TraversalConfiguration $TraversalConfiguration `
+                -Operation $Operation `
                 -Iteration $Iteration
 
             if ($query -ne "")
@@ -327,6 +896,7 @@ function Find-Subset
                 -State $Operation.State `
                 -Direction ([TraversalDirection]::Incoming) `
                 -TraversalConfiguration $TraversalConfiguration `
+                -Operation $Operation `
                 -Iteration $Iteration
 
             if ($query -ne "")
@@ -373,12 +943,10 @@ function Find-Subset
 
         Write-Verbose "Marking remaining Pending states as Exclude for iteration $Iteration"
 
-        # Pre-filter tables with PK outside the loop
-        $tables = $DatabaseInfo.Tables | Where-Object { $_.PrimaryKey.Count -gt 0 }
         $excludedCount = 0
 
         # Mark ALL remaining Pending as Exclude (those not promoted to Include during traversal)
-        foreach ($table in $tables)
+        foreach ($table in $userTablesWithPrimaryKey)
         {
             $signature = $structure.Tables[$table]
             $processing = $structure.GetProcessingName($signature, $SessionId)
@@ -637,6 +1205,15 @@ function Find-Subset
 
             $readText = if ($CollectSqlStatistics) { "; logical reads {0:N0}" -f $logicalReads } else { "; statistics off" }
             Write-Verbose ("Find-Subset SQL complete: {0}; iteration {1}; elapsed {2:N2}s{3}" -f $Phase, $Iteration, $watch.Elapsed.TotalSeconds, $readText)
+            Add-FindSubsetPerformanceSample `
+                -Category 'SQL' `
+                -Phase $Phase `
+                -Iteration $Iteration `
+                -Operation $Operation `
+                -Table $Table `
+                -ElapsedMs $watch.Elapsed.TotalMilliseconds `
+                -LogicalReads $logicalReads `
+                -SqlChars $Sql.Length
         }
     }
 
@@ -673,12 +1250,11 @@ function Find-Subset
             if ($checkpoint.Status -eq 'Completed')
             {
                 Write-Warning "Checkpoint indicates traversal already completed. Nothing to resume."
-                return [pscustomobject]@{
-                    Finished            = $true
-                    Initialized         = $true
-                    CompletedIterations = 0
-                    SubsetSizeGuard     = $null
-                }
+                return New-FindSubsetResult `
+                    -Finished $true `
+                    -Initialized $true `
+                    -CompletedIterations 0 `
+                    -SubsetSizeGuard $null
             }
             if ($checkpoint.SessionId -ne $SessionId)
             {
@@ -713,30 +1289,40 @@ SET Status = NULL,
     ProcessedIteration = NULL
 WHERE Status = 0 AND SessionId = '$SessionId';
 "@
-            $null = Invoke-SqlcmdEx -Sql $resetSql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $CollectSqlStatistics
+            $null = Invoke-FindSubsetSql -Sql $resetSql -Phase "Resetting abandoned operations" -Iteration $StartIteration
         }
         else
         {
-            $subsetGuardPreflight = Invoke-SubsetGuardPreflight `
-                -SessionId $SessionId `
-                -Database $Database `
-                -DatabaseInfo $DatabaseInfo `
-                -ConnectionInfo $ConnectionInfo `
-                -Structure $structure `
-                -StartIteration $StartIteration `
-                -IgnoredTables $IgnoredTables `
-                -TraversalConfiguration $TraversalConfiguration `
-                -FullSearch $FullSearch `
-                -MaxReachableTablePercent $MaxReachableTablePercent
+            $subsetGuardPreflight = Invoke-FindSubsetProfiledPowerShell `
+                -Phase 'Preflight subset guard check' `
+                -Iteration $StartIteration `
+                -ScriptBlock {
+                    Invoke-SubsetGuardPreflight `
+                        -SessionId $SessionId `
+                        -Database $Database `
+                        -DatabaseInfo $DatabaseInfo `
+                        -ConnectionInfo $ConnectionInfo `
+                        -Structure $structure `
+                        -StartIteration $StartIteration `
+                        -IgnoredTables $IgnoredTables `
+                        -TraversalConfiguration $TraversalConfiguration `
+                        -FullSearch $FullSearch `
+                        -MaxReachableTablePercent $MaxReachableTablePercent
+                }
 
             # Normal start: initialize operations
-            $null = Initialize-OperationsTable `
-                -SessionId $SessionId `
-                -Database $Database `
-                -ConnectionInfo $ConnectionInfo `
-                -DatabaseInfo $DatabaseInfo `
-                -StartIteration $StartIteration `
-                -Statistics $CollectSqlStatistics
+            $null = Invoke-FindSubsetProfiledPowerShell `
+                -Phase 'Initializing operations table' `
+                -Iteration $StartIteration `
+                -ScriptBlock {
+                    Initialize-OperationsTable `
+                        -SessionId $SessionId `
+                        -Database $Database `
+                        -ConnectionInfo $ConnectionInfo `
+                        -DatabaseInfo $DatabaseInfo `
+                        -StartIteration $StartIteration `
+                        -Statistics $CollectSqlStatistics
+                }
 
             # Write initial checkpoint
             if ($CheckpointPath)
@@ -812,16 +1398,21 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
             if (($iteration % $SubsetGuardCheckInterval) -eq 0)
             {
-                $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
-                    -SessionId $SessionId `
-                    -Database $Database `
-                    -DatabaseInfo $DatabaseInfo `
-                    -ConnectionInfo $ConnectionInfo `
-                    -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                $subsetGuardRuntime = Invoke-FindSubsetProfiledPowerShell `
+                    -Phase 'Runtime subset guard check' `
                     -Iteration $iteration `
-                    -Phase 'Runtime' `
-                    -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
-                    -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+                    -ScriptBlock {
+                        Invoke-SubsetGuardRuntimeCheck `
+                            -SessionId $SessionId `
+                            -Database $Database `
+                            -DatabaseInfo $DatabaseInfo `
+                            -ConnectionInfo $ConnectionInfo `
+                            -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                            -Iteration $iteration `
+                            -Phase 'Runtime' `
+                            -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
+                            -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+                    }
 
                 if ($subsetGuardRuntime.Exceeded)
                 {
@@ -839,16 +1430,21 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             Resolve-PendingStates -Iteration $iteration
         }
 
-        $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
-            -SessionId $SessionId `
-            -Database $Database `
-            -DatabaseInfo $DatabaseInfo `
-            -ConnectionInfo $ConnectionInfo `
-            -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+        $subsetGuardRuntime = Invoke-FindSubsetProfiledPowerShell `
+            -Phase 'Final subset guard check' `
             -Iteration $iteration `
-            -Phase 'Final' `
-            -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
-            -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+            -ScriptBlock {
+                Invoke-SubsetGuardRuntimeCheck `
+                    -SessionId $SessionId `
+                    -Database $Database `
+                    -DatabaseInfo $DatabaseInfo `
+                    -ConnectionInfo $ConnectionInfo `
+                    -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                    -Iteration $iteration `
+                    -Phase 'Final' `
+                    -EmitWarning (-not $subsetGuardRuntimeWarningRaised) `
+                    -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+            }
 
         if ($subsetGuardRuntime.Exceeded)
         {
@@ -880,44 +1476,52 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
         Write-Progress -Activity "Finding subset $SessionId" -Completed
 
-        return [pscustomobject]@{
-            Finished            = $true
-            Initialized         = $true
-            CompletedIterations = $iteration - $StartIteration
-            SubsetSizeGuard     = New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $subsetGuardRuntime
-        }
+        return New-FindSubsetResult `
+            -Finished $true `
+            -Initialized $true `
+            -CompletedIterations ($iteration - $StartIteration) `
+            -SubsetSizeGuard (New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $subsetGuardRuntime)
     }
     else
     {
         # Interactive mode: one iteration at a time
         if ($Iteration -eq 0)
         {
-            $subsetGuardPreflight = Invoke-SubsetGuardPreflight `
-                -SessionId $SessionId `
-                -Database $Database `
-                -DatabaseInfo $DatabaseInfo `
-                -ConnectionInfo $ConnectionInfo `
-                -Structure $structure `
-                -StartIteration $StartIteration `
-                -IgnoredTables $IgnoredTables `
-                -TraversalConfiguration $TraversalConfiguration `
-                -FullSearch $FullSearch `
-                -MaxReachableTablePercent $MaxReachableTablePercent
+            $subsetGuardPreflight = Invoke-FindSubsetProfiledPowerShell `
+                -Phase 'Preflight subset guard check' `
+                -Iteration $Iteration `
+                -ScriptBlock {
+                    Invoke-SubsetGuardPreflight `
+                        -SessionId $SessionId `
+                        -Database $Database `
+                        -DatabaseInfo $DatabaseInfo `
+                        -ConnectionInfo $ConnectionInfo `
+                        -Structure $structure `
+                        -StartIteration $StartIteration `
+                        -IgnoredTables $IgnoredTables `
+                        -TraversalConfiguration $TraversalConfiguration `
+                        -FullSearch $FullSearch `
+                        -MaxReachableTablePercent $MaxReachableTablePercent
+                }
 
-            $null = Initialize-OperationsTable `
-                -SessionId $SessionId `
-                -Database $Database `
-                -ConnectionInfo $ConnectionInfo `
-                -DatabaseInfo $DatabaseInfo `
-                -StartIteration $StartIteration `
-                -Statistics $CollectSqlStatistics
+            $null = Invoke-FindSubsetProfiledPowerShell `
+                -Phase 'Initializing operations table' `
+                -Iteration $Iteration `
+                -ScriptBlock {
+                    Initialize-OperationsTable `
+                        -SessionId $SessionId `
+                        -Database $Database `
+                        -ConnectionInfo $ConnectionInfo `
+                        -DatabaseInfo $DatabaseInfo `
+                        -StartIteration $StartIteration `
+                        -Statistics $CollectSqlStatistics
+                }
 
-            return [pscustomobject]@{
-                Finished            = $false
-                Initialized         = $true
-                CompletedIterations = 1
-                SubsetSizeGuard     = New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $null
-            }
+            return New-FindSubsetResult `
+                -Finished $false `
+                -Initialized $true `
+                -CompletedIterations 1 `
+                -SubsetSizeGuard (New-SubsetGuardResult -Preflight $subsetGuardPreflight -Runtime $null)
         }
         else
         {
@@ -933,24 +1537,28 @@ WHERE Status = 0 AND SessionId = '$SessionId';
 
             if (-not $hasMoreWork)
             {
-                $subsetGuardRuntime = Invoke-SubsetGuardRuntimeCheck `
-                    -SessionId $SessionId `
-                    -Database $Database `
-                    -DatabaseInfo $DatabaseInfo `
-                    -ConnectionInfo $ConnectionInfo `
-                    -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                $subsetGuardRuntime = Invoke-FindSubsetProfiledPowerShell `
+                    -Phase 'Final subset guard check' `
                     -Iteration $Iteration `
-                    -Phase 'Final' `
-                    -EmitWarning $true `
-                    -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+                    -ScriptBlock {
+                        Invoke-SubsetGuardRuntimeCheck `
+                            -SessionId $SessionId `
+                            -Database $Database `
+                            -DatabaseInfo $DatabaseInfo `
+                            -ConnectionInfo $ConnectionInfo `
+                            -MaxSubsetPercentOfSource $MaxSubsetPercentOfSource `
+                            -Iteration $Iteration `
+                            -Phase 'Final' `
+                            -EmitWarning $true `
+                            -ThrowOnExceeded $ThrowOnSubsetGuardExceeded
+                    }
             }
 
-            return [pscustomobject]@{
-                Finished            = -not $hasMoreWork
-                Initialized         = $true
-                CompletedIterations = 1
-                SubsetSizeGuard     = $(if (-not $hasMoreWork) { New-SubsetGuardResult -Preflight $null -Runtime $subsetGuardRuntime } else { $null })
-            }
+            return New-FindSubsetResult `
+                -Finished (-not $hasMoreWork) `
+                -Initialized $true `
+                -CompletedIterations 1 `
+                -SubsetSizeGuard $(if (-not $hasMoreWork) { New-SubsetGuardResult -Preflight $null -Runtime $subsetGuardRuntime } else { $null })
         }
     }
 
