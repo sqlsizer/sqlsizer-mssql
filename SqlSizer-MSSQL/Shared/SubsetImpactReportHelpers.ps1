@@ -91,7 +91,7 @@ function Get-SubsetImpactOriginalTableRows
     $sql = @"
 SELECT s.[name] AS SchemaName,
        t.[name] AS TableName,
-       ISNULL(SUM(CASE WHEN p.index_id IN (0, 1) THEN p.[rows] ELSE 0 END), 0) AS RowCount
+       ISNULL(SUM(CASE WHEN p.index_id IN (0, 1) THEN p.[rows] ELSE 0 END), 0) AS OriginalRows
 FROM sys.tables t
 INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
 LEFT JOIN sys.partitions p ON p.object_id = t.object_id
@@ -111,7 +111,7 @@ ORDER BY s.[name], t.[name];
         }
 
         $key = Get-SubsetImpactTableKey -SchemaName $row.SchemaName -TableName $row.TableName
-        $result[$key] = ConvertTo-SubsetImpactLong -Value $row.RowCount
+        $result[$key] = ConvertTo-SubsetImpactLong -Value $row.OriginalRows
     }
 
     return $result
