@@ -211,7 +211,7 @@ $report = Get-SubsetImpactReport -Database $db -SessionId $sid `
     -DatabaseInfo $info -ConnectionInfo $conn
 
 $report.Summary
-$report.Tables | Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows
+$report.Tables | Format-Table SchemaName, TableName, SubsetRows, OriginalRows, RowsExcluded, PercentOfOriginalRows
 $report.Relationships.Reached | Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
 ```
 
@@ -227,7 +227,7 @@ Export-SubsetImpactReport -Database $db -SessionId $sid `
     -Path ".\subset-impact.md" -Format Markdown
 ```
 
-The report includes table row counts, percent of source rows, estimated data KB when `DatabaseInfo` has measured table statistics, traversal operation progress, and reached/unreached foreign key relationships. It does not include row samples or full row data.
+The report includes every original user table with original row counts, subset row counts, row reduction, estimated data KB when `DatabaseInfo` has measured table statistics, traversal operation progress, and reached/unreached foreign key relationships. It does not include row samples or full row data.
 
 ---
 

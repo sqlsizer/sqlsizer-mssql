@@ -226,10 +226,16 @@ Describe 'Subset Impact Report' {
 
         $expectedTableCount = $testResult.Summary.Keys.Count
         $expectedTotalRows = Get-TotalSubsetRows -SubsetSummary $testResult.Summary
+        $expectedOriginalTableCount = @($script:DbInfo.Tables | Where-Object { -not $_.SchemaName.StartsWith('SqlSizer') }).Count
 
         $report.Summary.TableCount | Should -Be $expectedTableCount
+        $report.Summary.OriginalTableCount | Should -Be $expectedOriginalTableCount
         $report.Summary.TotalRows | Should -Be $expectedTotalRows
-        $report.Tables.Count | Should -Be $expectedTableCount
+        $report.Summary.OriginalRows | Should -BeGreaterThan 0
+        ($report.Summary.OriginalRows -ge $report.Summary.TotalRows) | Should -Be $true
+        $report.Tables.Count | Should -Be $expectedOriginalTableCount
+        $report.Tables[0].PSObject.Properties.Name | Should -Contain 'OriginalRows'
+        $report.Tables[0].PSObject.Properties.Name | Should -Contain 'RowsExcluded'
         $report.Relationships.Reached.Count | Should -BeGreaterThan 0
         $report.Relationships.Unreached.Count | Should -BeGreaterThan 0
         $report.Relationships.Reached[0].PSObject.Properties.Name | Should -Contain 'FromSchema'
@@ -274,6 +280,7 @@ Describe 'Subset Impact Report' {
 
         $json = Get-Content -Path $jsonFile.FullName -Raw | ConvertFrom-Json
         $json.Summary.TableCount | Should -Be $expectedTableCount
+        $json.Summary.OriginalTableCount | Should -Be $expectedOriginalTableCount
 
         Get-Content -Path $markdownFile.FullName -Raw | Should -Match '# SqlSizer Subset Impact Report'
         Get-Content -Path $htmlFile.FullName -Raw | Should -Match '<!doctype html>'

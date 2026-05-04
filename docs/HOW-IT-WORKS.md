@@ -1294,8 +1294,8 @@ Subset impact reports are read-only summaries of an existing SqlSizer session. T
 
 | Section | Contents |
 |---------|----------|
-| `Summary` | Database, session id, generated time, table count, total subset rows, estimated data KB, relationship counts, operation completion flag |
-| `Tables` | One row per included table with subset rows, source rows, percent of source, primary key size, historic/deletable flags, estimated data KB |
+| `Summary` | Database, session id, generated time, subset/original table counts, total subset/original rows, estimated data KB, relationship counts, operation completion flag |
+| `Tables` | One row per original user table with subset rows, original rows, row reduction, percent of original, primary key size, historic/deletable flags, estimated data KB |
 | `Relationships` | Reached, unreached, and all foreign key relationships for the session |
 | `Operations` | Traversal progress from `SqlSizer.Operations`, including processed/remaining records and state/depth breakdown |
 | `Warnings` | Non-fatal issues such as missing measured table statistics or unfinished traversal work |
@@ -1313,9 +1313,13 @@ The report intentionally does not include row samples or full row data.
 │       │                                                                 │
 │       ├─► Table impact: subset rows + PK size                           │
 │       │                                                                 │
+│  sys.tables + sys.partitions                                            │
+│       │                                                                 │
+│       ├─► Original row counts for every user table                      │
+│       │                                                                 │
 │  DatabaseInfo.Tables                                                    │
 │       │                                                                 │
-│       ├─► Source rows, table data KB, historic/deletable flags          │
+│       ├─► Table data KB, historic/deletable flags                       │
 │       │                                                                 │
 │  SqlSizer.Operations WHERE SessionId = ...                              │
 │       │                                                                 │
@@ -1335,10 +1339,10 @@ The report intentionally does not include row samples or full row data.
 Table size impact is estimated proportionally from measured `DatabaseInfo` table statistics:
 
 ```
-EstimatedDataKB = TableDataKB * SubsetRows / SourceRows
+EstimatedDataKB = TableDataKB * SubsetRows / OriginalRows
 ```
 
-If `Get-DatabaseInfo` was run without measured table sizes, row impact still works but size fields are `$null` and the report includes a warning.
+Original row counts are read from SQL Server metadata when the report is generated. If `Get-DatabaseInfo` was run without measured table sizes, row impact still works but size fields are `$null` and the report includes a warning.
 
 ### Usage
 
@@ -1348,7 +1352,7 @@ $report = Get-SubsetImpactReport -Database $db -SessionId $sid `
 
 $report.Summary
 $report.Tables | Sort-Object EstimatedDataKB -Descending |
-    Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows, EstimatedDataKB
+    Format-Table SchemaName, TableName, SubsetRows, OriginalRows, RowsExcluded, PercentOfOriginalRows, EstimatedDataKB
 
 $report.Relationships.Unreached |
     Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
@@ -1566,7 +1570,7 @@ $report = Get-SubsetImpactReport -Database $db -SessionId $sessionId `
     -DatabaseInfo $info -ConnectionInfo $connection
 
 $report.Summary
-$report.Tables | Format-Table SchemaName, TableName, SubsetRows, SourceRows, PercentOfSourceRows
+$report.Tables | Format-Table SchemaName, TableName, SubsetRows, OriginalRows, RowsExcluded, PercentOfOriginalRows
 $report.Relationships.Reached | Format-Table Name, FromSchema, FromTable, ToSchema, ToTable
 
 # Write a shareable report

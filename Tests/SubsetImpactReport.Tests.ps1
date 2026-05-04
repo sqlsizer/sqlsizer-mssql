@@ -14,9 +14,14 @@ BeforeAll {
             SessionId              = 'SESSION_123'
             GeneratedAt            = '2026-04-29T20:00:00.0000000Z'
             TableCount             = 2
+            OriginalTableCount     = 2
             TotalRows              = 15
+            OriginalRows           = 1500
             SourceRows             = 1500
+            RowsExcluded           = 1485
+            PercentOfOriginalRows  = 1.0
             PercentOfSourceRows    = 1.0
+            PercentRowsExcluded    = 99.0
             EstimatedDataKB        = 42.5
             RelationshipsReached   = 1
             RelationshipsUnreached = 1
@@ -28,8 +33,12 @@ BeforeAll {
                 SchemaName          = 'dbo'
                 TableName           = 'Orders'
                 SubsetRows          = 10
+                OriginalRows        = 1000
                 SourceRows          = 1000
+                RowsExcluded        = 990
+                PercentOfOriginalRows = 1.0
                 PercentOfSourceRows = 1.0
+                PercentRowsExcluded = 99.0
                 PrimaryKeySize      = 1
                 CanBeDeleted        = $true
                 IsHistoric          = $false
@@ -39,8 +48,12 @@ BeforeAll {
                 SchemaName          = 'dbo'
                 TableName           = 'Customers'
                 SubsetRows          = 5
+                OriginalRows        = 500
                 SourceRows          = 500
+                RowsExcluded        = 495
+                PercentOfOriginalRows = 1.0
                 PercentOfSourceRows = 1.0
+                PercentRowsExcluded = 99.0
                 PrimaryKeySize      = 1
                 CanBeDeleted        = $true
                 IsHistoric          = $false
@@ -124,7 +137,11 @@ Describe 'New-SubsetImpactReportObject' {
         $report.PSObject.Properties.Name | Should -Contain 'Relationships'
         $report.PSObject.Properties.Name | Should -Contain 'Operations'
         $report.PSObject.Properties.Name | Should -Contain 'Warnings'
+        $report.Summary.OriginalTableCount | Should -Be 2
+        $report.Summary.OriginalRows | Should -Be 1500
         $report.Tables.Count | Should -Be 2
+        $report.Tables[0].PSObject.Properties.Name | Should -Contain 'OriginalRows'
+        $report.Tables[0].PSObject.Properties.Name | Should -Contain 'RowsExcluded'
         $report.Relationships.Reached.Count | Should -Be 1
     }
 }
@@ -135,6 +152,8 @@ Describe 'ConvertTo-SubsetImpactReportMarkdown' {
 
         $markdown | Should -Match '# SqlSizer Subset Impact Report'
         $markdown | Should -Match 'SyntheticDb'
+        $markdown | Should -Match 'Original Rows'
+        $markdown | Should -Match 'Rows Excluded'
         $markdown | Should -Match 'dbo\.Orders'
         $markdown | Should -Match 'FK_Orders_Customers'
         $markdown | Should -Match 'Include'
@@ -154,6 +173,7 @@ Describe 'ConvertTo-SubsetImpactReportHtml' {
 
         $html | Should -Match '<!doctype html>'
         $html | Should -Match 'SqlSizer Subset Impact Report'
+        $html | Should -Match 'Original Rows'
         $html | Should -Match 'dbo\.Customers'
         $html | Should -Match 'Synthetic &lt;warning&gt;'
     }
@@ -165,7 +185,9 @@ Describe 'JSON serialization' {
         $roundTripped = $json | ConvertFrom-Json
 
         $roundTripped.Summary.Database | Should -Be 'SyntheticDb'
+        $roundTripped.Summary.OriginalRows | Should -Be 1500
         $roundTripped.Tables.Count | Should -Be 2
+        $roundTripped.Tables[0].RowsExcluded | Should -Be 990
         $roundTripped.Relationships.Reached[0].Name | Should -Be 'FK_Orders_Customers'
         $roundTripped.Operations.ByStateAndDepth.Count | Should -Be 2
     }

@@ -5,8 +5,8 @@ function Get-SubsetImpactReport
         Builds a read-only impact report for an existing SqlSizer subset session.
 
     .DESCRIPTION
-        Summarizes the current subset session, including impacted tables, estimated data size,
-        traversal operation progress, and reached/unreached foreign key relationships.
+        Summarizes the current subset session, including original database table row counts,
+        subset rows, estimated data size, traversal operation progress, and reached/unreached foreign key relationships.
         The report does not include row samples or full row data.
 
     .PARAMETER SessionId
@@ -44,11 +44,6 @@ function Get-SubsetImpactReport
     Test-SubsetImpactSessionId -SessionId $SessionId
 
     $warnings = @()
-    $tableLookup = @{}
-    foreach ($tableInfo in $DatabaseInfo.Tables)
-    {
-        $tableLookup["$($tableInfo.SchemaName), $($tableInfo.TableName)"] = $tableInfo
-    }
 
     $subsetStats = Get-SubsetTableStatistics `
         -SessionId $SessionId `
@@ -57,70 +52,130 @@ function Get-SubsetImpactReport
         -ConnectionInfo $ConnectionInfo
 
     $subsetTables = @($subsetStats | Where-Object { $_.RowCount -gt 0 } | Sort-Object SchemaName, TableName)
+    $subsetStatsByKey = @{}
+    foreach ($subsetStat in @($subsetStats))
+    {
+        $key = Get-SubsetImpactTableKey -SchemaName $subsetStat.SchemaName -TableName $subsetStat.TableName
+        $subsetStatsByKey[$key] = $subsetStat
+    }
+
+    $originalRowCounts = Get-SubsetImpactOriginalTableRows `
+        -Database $Database `
+        -ConnectionInfo $ConnectionInfo
+
+    $originalTables = @($DatabaseInfo.Tables | Where-Object { Test-SubsetImpactUserTable -Table $_ } | Sort-Object SchemaName, TableName)
     $tables = @()
     $totalRows = [long]0
-    $sourceRowsTotal = [long]0
+    $originalRowsTotal = [long]0
     $estimatedDataTotal = [double]0
     $hasEstimatedData = $false
-    $missingStatistics = $false
+    $missingOriginalRows = $false
+    $missingSizeStatistics = $false
 
-    foreach ($subsetTable in $subsetTables)
+    foreach ($tableInfo in $originalTables)
     {
-        $tableInfo = $tableLookup["$($subsetTable.SchemaName), $($subsetTable.TableName)"]
-        $sourceRows = $null
-        $percentOfSourceRows = $null
-        $estimatedDataKB = $null
-        $isHistoric = $false
-
-        if ($null -ne $tableInfo)
+        $key = Get-SubsetImpactTableKey -SchemaName $tableInfo.SchemaName -TableName $tableInfo.TableName
+        $subsetTable = $null
+        if ($subsetStatsByKey.ContainsKey($key))
         {
-            $isHistoric = $tableInfo.IsHistoric
+            $subsetTable = $subsetStatsByKey[$key]
+        }
 
-            if ($null -ne $tableInfo.Statistics)
+        $subsetRows = [long]0
+        $primaryKeySize = 0
+        if ($null -ne $tableInfo.PrimaryKey)
+        {
+            $primaryKeySize = [int]$tableInfo.PrimaryKey.Count
+        }
+
+        $canBeDeleted = ($tableInfo.IsHistoric -eq $false)
+        if ($null -ne $subsetTable)
+        {
+            $subsetRows = ConvertTo-SubsetImpactLong -Value $subsetTable.RowCount
+            if ($null -eq $subsetRows)
             {
-                $sourceRows = ConvertTo-SubsetImpactLong -Value $tableInfo.Statistics.Rows
-
-                if (($null -ne $sourceRows) -and ($sourceRows -gt 0))
-                {
-                    $sourceRowsTotal += $sourceRows
-                    $percentOfSourceRows = [Math]::Round(100.0 * [double]$subsetTable.RowCount / [double]$sourceRows, 2)
-
-                    $dataKB = ConvertTo-SubsetImpactDouble -Value $tableInfo.Statistics.DataKB
-                    if ($null -ne $dataKB)
-                    {
-                        $estimatedDataKB = [Math]::Round($dataKB * [double]$subsetTable.RowCount / [double]$sourceRows, 2)
-                        $estimatedDataTotal += $estimatedDataKB
-                        $hasEstimatedData = $true
-                    }
-                }
-                elseif ($null -ne $sourceRows)
-                {
-                    $sourceRowsTotal += $sourceRows
-                }
+                $subsetRows = 0
             }
-            else
+
+            $primaryKeySize = [int]$subsetTable.PrimaryKeySize
+            $canBeDeleted = [bool]$subsetTable.CanBeDeleted
+        }
+
+        $originalRows = $null
+        $percentOfOriginalRows = $null
+        $rowsExcluded = $null
+        $percentRowsExcluded = $null
+        $estimatedDataKB = $null
+
+        if ($originalRowCounts.ContainsKey($key))
+        {
+            $originalRows = $originalRowCounts[$key]
+        }
+        elseif ($null -ne $tableInfo.Statistics)
+        {
+            $originalRows = ConvertTo-SubsetImpactLong -Value $tableInfo.Statistics.Rows
+        }
+        else
+        {
+            $missingOriginalRows = $true
+        }
+
+        if ($null -ne $originalRows)
+        {
+            $originalRowsTotal += $originalRows
+            $rowsExcluded = $originalRows - $subsetRows
+
+            if ($originalRows -gt 0)
             {
-                $missingStatistics = $true
+                $percentOfOriginalRows = [Math]::Round(100.0 * [double]$subsetRows / [double]$originalRows, 2)
+                $percentRowsExcluded = [Math]::Round(100.0 * [double]$rowsExcluded / [double]$originalRows, 2)
             }
         }
 
-        $totalRows += [long]$subsetTable.RowCount
+        if ($null -ne $tableInfo.Statistics)
+        {
+            $dataKB = ConvertTo-SubsetImpactDouble -Value $tableInfo.Statistics.DataKB
+            if (($null -ne $dataKB) -and ($null -ne $originalRows) -and ($originalRows -gt 0))
+            {
+                $estimatedDataKB = [Math]::Round($dataKB * [double]$subsetRows / [double]$originalRows, 2)
+                if ($subsetRows -gt 0)
+                {
+                    $estimatedDataTotal += $estimatedDataKB
+                    $hasEstimatedData = $true
+                }
+            }
+        }
+        elseif ($subsetRows -gt 0)
+        {
+            $missingSizeStatistics = $true
+        }
+
+        $totalRows += $subsetRows
         $tables += [pscustomobject]@{
-            SchemaName          = $subsetTable.SchemaName
-            TableName           = $subsetTable.TableName
-            SubsetRows          = [long]$subsetTable.RowCount
-            SourceRows          = $sourceRows
-            PercentOfSourceRows = $percentOfSourceRows
-            PrimaryKeySize      = [int]$subsetTable.PrimaryKeySize
-            CanBeDeleted        = [bool]$subsetTable.CanBeDeleted
-            IsHistoric          = [bool]$isHistoric
-            EstimatedDataKB     = $estimatedDataKB
+            SchemaName            = $tableInfo.SchemaName
+            TableName             = $tableInfo.TableName
+            SubsetRows            = $subsetRows
+            OriginalRows          = $originalRows
+            SourceRows            = $originalRows
+            RowsExcluded          = $rowsExcluded
+            PercentOfOriginalRows = $percentOfOriginalRows
+            PercentOfSourceRows   = $percentOfOriginalRows
+            PercentRowsExcluded   = $percentRowsExcluded
+            PrimaryKeySize        = $primaryKeySize
+            CanBeDeleted          = [bool]$canBeDeleted
+            IsHistoric            = [bool]$tableInfo.IsHistoric
+            EstimatedDataKB       = $estimatedDataKB
         }
     }
 
-    if ($missingStatistics)
+    if ($missingOriginalRows)
     {
-        $warnings += 'DatabaseInfo does not include measured statistics for one or more subset tables. Run Get-DatabaseInfo with size measurement enabled for size estimates.'
+        $warnings += 'Original row counts were unavailable for one or more database tables.'
+    }
+
+    if ($missingSizeStatistics)
+    {
+        $warnings += 'DatabaseInfo does not include measured size statistics for one or more subset tables. Run Get-DatabaseInfo with size measurement enabled for size estimates.'
     }
 
     if ($subsetTables.Count -eq 0)
@@ -212,24 +267,40 @@ function Get-SubsetImpactReport
         -DatabaseInfo $DatabaseInfo `
         -ConnectionInfo $ConnectionInfo
 
-    $percentOfSourceRows = $null
-    if ($sourceRowsTotal -gt 0)
+    $summaryOriginalRows = $null
+    $summaryRowsExcluded = $null
+    $percentOfOriginalRows = $null
+    $percentRowsExcluded = $null
+
+    if (-not $missingOriginalRows)
     {
-        $percentOfSourceRows = [Math]::Round(100.0 * [double]$totalRows / [double]$sourceRowsTotal, 2)
+        $summaryOriginalRows = $originalRowsTotal
+        $summaryRowsExcluded = $originalRowsTotal - $totalRows
+
+        if ($originalRowsTotal -gt 0)
+        {
+            $percentOfOriginalRows = [Math]::Round(100.0 * [double]$totalRows / [double]$originalRowsTotal, 2)
+            $percentRowsExcluded = [Math]::Round(100.0 * [double]$summaryRowsExcluded / [double]$originalRowsTotal, 2)
+        }
     }
 
     $summary = [pscustomobject]@{
-        Database              = $Database
-        SessionId             = $SessionId
-        GeneratedAt           = (Get-Date).ToString('o')
-        TableCount            = [int]$subsetTables.Count
-        TotalRows             = $totalRows
-        SourceRows            = $sourceRowsTotal
-        PercentOfSourceRows   = $percentOfSourceRows
-        EstimatedDataKB       = $(if ($hasEstimatedData) { [Math]::Round($estimatedDataTotal, 2) } else { $null })
-        RelationshipsReached  = [int]$relationships.Reached.Count
+        Database               = $Database
+        SessionId              = $SessionId
+        GeneratedAt            = (Get-Date).ToString('o')
+        TableCount             = [int]$subsetTables.Count
+        OriginalTableCount     = [int]$originalTables.Count
+        TotalRows              = $totalRows
+        OriginalRows           = $summaryOriginalRows
+        SourceRows             = $summaryOriginalRows
+        RowsExcluded           = $summaryRowsExcluded
+        PercentOfOriginalRows  = $percentOfOriginalRows
+        PercentOfSourceRows    = $percentOfOriginalRows
+        PercentRowsExcluded    = $percentRowsExcluded
+        EstimatedDataKB        = $(if ($hasEstimatedData) { [Math]::Round($estimatedDataTotal, 2) } else { $null })
+        RelationshipsReached   = [int]$relationships.Reached.Count
         RelationshipsUnreached = [int]$relationships.Unreached.Count
-        OperationsComplete    = ($recordsRemaining -eq 0)
+        OperationsComplete     = ($recordsRemaining -eq 0)
     }
 
     return New-SubsetImpactReportObject `

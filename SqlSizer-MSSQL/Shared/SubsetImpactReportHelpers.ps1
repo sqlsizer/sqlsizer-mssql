@@ -45,6 +45,78 @@ function ConvertTo-SubsetImpactDouble
     return [double]$Value
 }
 
+function Get-SubsetImpactTableKey
+{
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$SchemaName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TableName
+    )
+
+    return "$SchemaName, $TableName"
+}
+
+function Test-SubsetImpactUserTable
+{
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [TableInfo]$Table
+    )
+
+    if (($null -eq $Table.SchemaName) -or ($Table.SchemaName.StartsWith('SqlSizer')))
+    {
+        return $false
+    }
+
+    return $true
+}
+
+function Get-SubsetImpactOriginalTableRows
+{
+    [cmdletbinding()]
+    [outputtype([hashtable])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$Database,
+
+        [Parameter(Mandatory = $true)]
+        [SqlConnectionInfo]$ConnectionInfo
+    )
+
+    $sql = @"
+SELECT s.[name] AS SchemaName,
+       t.[name] AS TableName,
+       ISNULL(SUM(CASE WHEN p.index_id IN (0, 1) THEN p.[rows] ELSE 0 END), 0) AS RowCount
+FROM sys.tables t
+INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+LEFT JOIN sys.partitions p ON p.object_id = t.object_id
+WHERE s.[name] NOT LIKE 'SqlSizer%'
+GROUP BY s.[name], t.[name]
+ORDER BY s.[name], t.[name];
+"@
+
+    $result = @{}
+    $rows = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
+    foreach ($row in @($rows))
+    {
+        if (($null -eq $row) -or ($null -eq $row.SchemaName) -or ($null -eq $row.TableName))
+        {
+            continue
+        }
+
+        $key = Get-SubsetImpactTableKey -SchemaName $row.SchemaName -TableName $row.TableName
+        $result[$key] = ConvertTo-SubsetImpactLong -Value $row.RowCount
+    }
+
+    return $result
+}
+
 function New-SubsetImpactReportObject
 {
     [cmdletbinding()]
@@ -241,6 +313,12 @@ function ConvertTo-SubsetImpactReportMarkdown
     )
 
     $lines = [System.Collections.Generic.List[string]]::new()
+    $summaryOriginalRows = $Report.Summary.OriginalRows
+    if ($null -eq $summaryOriginalRows) { $summaryOriginalRows = $Report.Summary.SourceRows }
+
+    $summaryPercentOfOriginalRows = $Report.Summary.PercentOfOriginalRows
+    if ($null -eq $summaryPercentOfOriginalRows) { $summaryPercentOfOriginalRows = $Report.Summary.PercentOfSourceRows }
+
     $lines.Add('# SqlSizer Subset Impact Report')
     $lines.Add('')
     $lines.Add('## Summary')
@@ -249,25 +327,34 @@ function ConvertTo-SubsetImpactReportMarkdown
     $lines.Add("| Database | $(Format-SubsetImpactMarkdownValue $Report.Summary.Database) |")
     $lines.Add("| Session | $(Format-SubsetImpactMarkdownValue $Report.Summary.SessionId) |")
     $lines.Add("| Generated | $(Format-SubsetImpactMarkdownValue $Report.Summary.GeneratedAt) |")
-    $lines.Add("| Tables | $(Format-SubsetImpactMarkdownValue $Report.Summary.TableCount) |")
-    $lines.Add("| Rows | $(Format-SubsetImpactMarkdownValue $Report.Summary.TotalRows) |")
-    $lines.Add("| Source rows | $(Format-SubsetImpactMarkdownValue $Report.Summary.SourceRows) |")
-    $lines.Add("| Percent of source rows | $(Format-SubsetImpactMarkdownValue $Report.Summary.PercentOfSourceRows) |")
+    $lines.Add("| Subset tables | $(Format-SubsetImpactMarkdownValue $Report.Summary.TableCount) |")
+    $lines.Add("| Original tables | $(Format-SubsetImpactMarkdownValue $Report.Summary.OriginalTableCount) |")
+    $lines.Add("| Subset rows | $(Format-SubsetImpactMarkdownValue $Report.Summary.TotalRows) |")
+    $lines.Add("| Original rows | $(Format-SubsetImpactMarkdownValue $summaryOriginalRows) |")
+    $lines.Add("| Percent of original rows | $(Format-SubsetImpactMarkdownValue $summaryPercentOfOriginalRows) |")
+    $lines.Add("| Rows excluded | $(Format-SubsetImpactMarkdownValue $Report.Summary.RowsExcluded) |")
+    $lines.Add("| Percent rows excluded | $(Format-SubsetImpactMarkdownValue $Report.Summary.PercentRowsExcluded) |")
     $lines.Add("| Estimated data KB | $(Format-SubsetImpactMarkdownValue $Report.Summary.EstimatedDataKB) |")
     $lines.Add("| Operations complete | $(Format-SubsetImpactMarkdownValue $Report.Summary.OperationsComplete) |")
     $lines.Add('')
 
     $lines.Add('## Tables')
-    $lines.Add('| Table | Subset Rows | Source Rows | % Source | Estimated Data KB | PK Size | Deletable | Historic |')
-    $lines.Add('|---|---:|---:|---:|---:|---:|---|---|')
+    $lines.Add('| Table | Subset Rows | Original Rows | Rows Excluded | % Original | % Rows Excluded | Estimated Data KB | PK Size | Deletable | Historic |')
+    $lines.Add('|---|---:|---:|---:|---:|---:|---:|---:|---|---|')
     foreach ($table in $Report.Tables)
     {
         $name = Format-SubsetImpactTableName -Schema $table.SchemaName -Table $table.TableName
-        $lines.Add("| $(Format-SubsetImpactMarkdownValue $name) | $(Format-SubsetImpactMarkdownValue $table.SubsetRows) | $(Format-SubsetImpactMarkdownValue $table.SourceRows) | $(Format-SubsetImpactMarkdownValue $table.PercentOfSourceRows) | $(Format-SubsetImpactMarkdownValue $table.EstimatedDataKB) | $(Format-SubsetImpactMarkdownValue $table.PrimaryKeySize) | $(Format-SubsetImpactMarkdownValue $table.CanBeDeleted) | $(Format-SubsetImpactMarkdownValue $table.IsHistoric) |")
+        $originalRows = $table.OriginalRows
+        if ($null -eq $originalRows) { $originalRows = $table.SourceRows }
+
+        $percentOfOriginalRows = $table.PercentOfOriginalRows
+        if ($null -eq $percentOfOriginalRows) { $percentOfOriginalRows = $table.PercentOfSourceRows }
+
+        $lines.Add("| $(Format-SubsetImpactMarkdownValue $name) | $(Format-SubsetImpactMarkdownValue $table.SubsetRows) | $(Format-SubsetImpactMarkdownValue $originalRows) | $(Format-SubsetImpactMarkdownValue $table.RowsExcluded) | $(Format-SubsetImpactMarkdownValue $percentOfOriginalRows) | $(Format-SubsetImpactMarkdownValue $table.PercentRowsExcluded) | $(Format-SubsetImpactMarkdownValue $table.EstimatedDataKB) | $(Format-SubsetImpactMarkdownValue $table.PrimaryKeySize) | $(Format-SubsetImpactMarkdownValue $table.CanBeDeleted) | $(Format-SubsetImpactMarkdownValue $table.IsHistoric) |")
     }
     if ($Report.Tables.Count -eq 0)
     {
-        $lines.Add('| _(none)_ |  |  |  |  |  |  |  |')
+        $lines.Add('| _(none)_ |  |  |  |  |  |  |  |  |  |')
     }
     $lines.Add('')
 
@@ -339,6 +426,12 @@ function ConvertTo-SubsetImpactReportHtml
     )
 
     $lines = [System.Collections.Generic.List[string]]::new()
+    $summaryOriginalRows = $Report.Summary.OriginalRows
+    if ($null -eq $summaryOriginalRows) { $summaryOriginalRows = $Report.Summary.SourceRows }
+
+    $summaryPercentOfOriginalRows = $Report.Summary.PercentOfOriginalRows
+    if ($null -eq $summaryPercentOfOriginalRows) { $summaryPercentOfOriginalRows = $Report.Summary.PercentOfSourceRows }
+
     $lines.Add('<!doctype html>')
     $lines.Add('<html lang="en">')
     $lines.Add('<head>')
@@ -361,10 +454,13 @@ function ConvertTo-SubsetImpactReportHtml
         @('Database', $Report.Summary.Database),
         @('Session', $Report.Summary.SessionId),
         @('Generated', $Report.Summary.GeneratedAt),
-        @('Tables', $Report.Summary.TableCount),
-        @('Rows', $Report.Summary.TotalRows),
-        @('Source rows', $Report.Summary.SourceRows),
-        @('Percent of source rows', $Report.Summary.PercentOfSourceRows),
+        @('Subset tables', $Report.Summary.TableCount),
+        @('Original tables', $Report.Summary.OriginalTableCount),
+        @('Subset rows', $Report.Summary.TotalRows),
+        @('Original rows', $summaryOriginalRows),
+        @('Percent of original rows', $summaryPercentOfOriginalRows),
+        @('Rows excluded', $Report.Summary.RowsExcluded),
+        @('Percent rows excluded', $Report.Summary.PercentRowsExcluded),
         @('Estimated data KB', $Report.Summary.EstimatedDataKB),
         @('Operations complete', $Report.Summary.OperationsComplete)
     )
@@ -375,15 +471,21 @@ function ConvertTo-SubsetImpactReportHtml
     $lines.Add('</tbody></table>')
 
     $lines.Add('<h2>Tables</h2>')
-    $lines.Add('<table><thead><tr><th>Table</th><th>Subset Rows</th><th>Source Rows</th><th>% Source</th><th>Estimated Data KB</th><th>PK Size</th><th>Deletable</th><th>Historic</th></tr></thead><tbody>')
+    $lines.Add('<table><thead><tr><th>Table</th><th>Subset Rows</th><th>Original Rows</th><th>Rows Excluded</th><th>% Original</th><th>% Rows Excluded</th><th>Estimated Data KB</th><th>PK Size</th><th>Deletable</th><th>Historic</th></tr></thead><tbody>')
     foreach ($table in $Report.Tables)
     {
         $name = Format-SubsetImpactTableName -Schema $table.SchemaName -Table $table.TableName
-        $lines.Add("<tr><td>$(Format-SubsetImpactHtmlValue $name)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.SubsetRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.SourceRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.PercentOfSourceRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.EstimatedDataKB)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.PrimaryKeySize)</td><td>$(Format-SubsetImpactHtmlValue $table.CanBeDeleted)</td><td>$(Format-SubsetImpactHtmlValue $table.IsHistoric)</td></tr>")
+        $originalRows = $table.OriginalRows
+        if ($null -eq $originalRows) { $originalRows = $table.SourceRows }
+
+        $percentOfOriginalRows = $table.PercentOfOriginalRows
+        if ($null -eq $percentOfOriginalRows) { $percentOfOriginalRows = $table.PercentOfSourceRows }
+
+        $lines.Add("<tr><td>$(Format-SubsetImpactHtmlValue $name)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.SubsetRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $originalRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.RowsExcluded)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $percentOfOriginalRows)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.PercentRowsExcluded)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.EstimatedDataKB)</td><td class=""num"">$(Format-SubsetImpactHtmlValue $table.PrimaryKeySize)</td><td>$(Format-SubsetImpactHtmlValue $table.CanBeDeleted)</td><td>$(Format-SubsetImpactHtmlValue $table.IsHistoric)</td></tr>")
     }
     if ($Report.Tables.Count -eq 0)
     {
-        $lines.Add('<tr><td colspan="8"><em>none</em></td></tr>')
+        $lines.Add('<tr><td colspan="10"><em>none</em></td></tr>')
     }
     $lines.Add('</tbody></table>')
 
