@@ -15,7 +15,7 @@ function Copy-Functions
 
     Write-Progress -Activity "Copy functions" -PercentComplete 0
 
-    $sql = "SELECT s.name as [schema], OBJECT_DEFINITION(o.object_id) as definition
+    $sql = "SELECT s.name as [schema], o.name as [function_name], OBJECT_DEFINITION(o.object_id) as definition
     FROM sys.objects o
     INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
     WHERE o.type IN ('FN', 'IF', 'TF', 'FS', 'FT')
@@ -25,6 +25,7 @@ function Copy-Functions
     foreach ($row in $rows)
     {
         $schema = $row.schema
+        $functionName = $row.function_name
 
         $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
         if ($schemaExists -eq $false)
@@ -37,7 +38,11 @@ function Copy-Functions
         $definition = $definition.Replace("'", "''")
 
         $sql = "EXEC ('$definition')"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        $result = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Silent $true
+        if ($result -eq $false)
+        {
+            Write-Warning "Skipped function [$schema].[$functionName] in [$TargetDatabase]: it may reference features (e.g., full-text search, CLR) not configured in the target database."
+        }
     }
 
     Write-Progress -Activity "Copy functions" -Completed

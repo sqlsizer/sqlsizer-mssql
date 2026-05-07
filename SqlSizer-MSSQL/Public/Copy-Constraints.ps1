@@ -31,14 +31,19 @@ function Copy-Constraints
         $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
         if ($schemaExists -eq $false)
         {
-            $tmp = "CREATE SCHEMA $schema"
+            $tmp = "CREATE SCHEMA $(ConvertTo-SqlIdentifier $schema)"
             Invoke-SqlcmdEx -Sql $tmp -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
         }
 
-        $sql = "ALTER TABLE $schema.$tableName ADD CONSTRAINT $constraintName CHECK ($definition)"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        $sql = "ALTER TABLE $(ConvertTo-SqlIdentifier $schema).$(ConvertTo-SqlIdentifier $tableName) ADD CONSTRAINT $(ConvertTo-SqlIdentifier $constraintName) CHECK ($definition)"
+        $constraintResult = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Silent $true
+        if ($constraintResult -eq $false)
+        {
+            Write-Warning "Skipped check constraint [$constraintName] on [$schema].[$tableName] in [$TargetDatabase]: the constraint definition may reference objects not present in the target database."
+            continue
+        }
 
-        $sql = "ALTER TABLE $schema.$tableName CHECK CONSTRAINT $constraintName"
+        $sql = "ALTER TABLE $(ConvertTo-SqlIdentifier $schema).$(ConvertTo-SqlIdentifier $tableName) CHECK CONSTRAINT $(ConvertTo-SqlIdentifier $constraintName)"
         $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
     }
 

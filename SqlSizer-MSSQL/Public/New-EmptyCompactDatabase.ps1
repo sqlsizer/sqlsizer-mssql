@@ -784,7 +784,11 @@ ORDER BY s.name, t.name, tr.name;
         }
 
         $definition = $row.Definition.Replace("'", "''")
-        $null = Invoke-SqlcmdEx -Sql "EXEC(N'$definition')" -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
+        $triggerResult = Invoke-SqlcmdEx -Sql "EXEC(N'$definition')" -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false -Silent $true
+        if ($triggerResult -eq $false)
+        {
+            Write-Warning "Skipped trigger [$($row.TriggerName)] on [$($row.SchemaName)].[$($row.TableName)] in [$TargetDatabase]: it may reference features (e.g., full-text search, CLR) not configured in the target database."
+        }
 
         if ([bool]$row.IsDisabled)
         {

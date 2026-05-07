@@ -20,7 +20,7 @@ function Get-SubsetTables
         [SqlConnectionInfo]$ConnectionInfo
     )
 
-    $tables = Get-SubsetTableStatistics -Database $Database -Connection $ConnectionInfo -DatabaseInfo $DatabaseInfo -SessionId $SessionId
+    $tables = Get-SubsetTableStatistics -Database $Database -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo -SessionId $SessionId
 
     if ($Negation -eq $false)
     {
