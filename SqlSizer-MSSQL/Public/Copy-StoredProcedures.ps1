@@ -15,7 +15,7 @@ function Copy-StoredProcedures
 
     Write-Progress -Activity "Copy stored procedures" -PercentComplete 0
 
-    $sql = "SELECT s.name as [schema], object_definition(o.object_id) as [definition]
+    $sql = "SELECT s.name as [schema], o.name as [procedure_name], object_definition(o.object_id) as [definition]
     FROM sys.objects o
     INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
     WHERE type='P'"
@@ -24,6 +24,7 @@ function Copy-StoredProcedures
     foreach ($row in $rows)
     {
         $schema = $row.schema
+        $procedureName = $row.procedure_name
 
         $schemaExists = Test-SchemaExists -SchemaName $schema -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
         if ($schemaExists -eq $false)
@@ -36,7 +37,11 @@ function Copy-StoredProcedures
         $definition = $definition.Replace("'", "''")
 
         $sql = "EXEC ('$definition')"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        $result = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Silent $true
+        if ($result -eq $false)
+        {
+            Write-Warning "Skipped stored procedure [$schema].[$procedureName] in [$TargetDatabase]: it may reference features (e.g., full-text search) not configured in the target database."
+        }
     }
 
     Write-Progress -Activity "Copy stored procedures" -Completed

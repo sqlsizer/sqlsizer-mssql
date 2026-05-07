@@ -1136,26 +1136,42 @@ function Find-Subset
             $elapsed = (Get-Date) - $startTime
         }
 
+        if (($null -ne $Operation) -and ($null -ne $Table))
+        {
+            $progressState.LastOperation = $Operation
+            $progressState.LastTable = $Table
+        }
+        $displayOperation = $progressState.LastOperation
+        $displayTable = $progressState.LastTable
+
         $progressPercent = Get-FindSubsetProgressPercent -Statistics $stats
-        $progressStatus = Get-FindSubsetProgressStatus `
+        $elapsedFormatted = Format-FindSubsetProgressElapsedTime -ElapsedTime $elapsed
+
+        Write-Progress -Id 1 `
+                       -Activity "Finding subset $SessionId" `
+                       -Status "$Phase | elapsed $elapsedFormatted | iteration $Iteration" `
+                       -PercentComplete ([int][Math]::Round($progressPercent))
+
+        $statsStatus = Get-FindSubsetProgressStatus `
             -Statistics $stats `
             -Iteration $Iteration `
             -ElapsedTime $elapsed `
-            -Phase $Phase
+            -Phase ""
+        Write-Progress -Id 2 -ParentId 1 `
+                       -Activity "Records" `
+                       -Status $statsStatus
 
-        if (($null -ne $Operation) -and ($null -ne $Table))
+        $operationStatus = if (($null -ne $displayOperation) -and ($null -ne $displayTable))
         {
-            $progressOperation = Get-FindSubsetProgressCurrentOperation -Table $Table -Operation $Operation -Phase $Phase
+            Get-FindSubsetProgressCurrentOperation -Table $displayTable -Operation $displayOperation -Phase $Phase
         }
         else
         {
-            $progressOperation = $Phase
+            $Phase
         }
-
-        Write-Progress -Activity "Finding subset $SessionId" `
-                       -Status $progressStatus `
-                       -CurrentOperation $progressOperation `
-                       -PercentComplete ([int][Math]::Round($progressPercent))
+        Write-Progress -Id 3 -ParentId 1 `
+                       -Activity "Last operation" `
+                       -Status $operationStatus
     }
 
     function Invoke-FindSubsetSql
@@ -1351,6 +1367,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         $startTime = Get-Date
         $iteration = $StartIteration + 1
         $progressStats = Get-IterationStatistics -Iteration $StartIteration -StartTime $startTime
+        $progressState = @{ LastOperation = $null; LastTable = $null }
 
         do
         {
@@ -1474,7 +1491,9 @@ WHERE Status = 0 AND SessionId = '$SessionId';
             Write-Verbose "Traversal completed. Final checkpoint saved to $CheckpointPath"
         }
 
-        Write-Progress -Activity "Finding subset $SessionId" -Completed
+        Write-Progress -Id 1 -Activity "Finding subset $SessionId" -Completed
+        Write-Progress -Id 2 -Activity "Records" -Completed
+        Write-Progress -Id 3 -Activity "Last operation" -Completed
 
         return New-FindSubsetResult `
             -Finished $true `
