@@ -20,8 +20,9 @@ function Save-Subset
     )
 
     $guid = (New-Guid).ToString()
+    $escapedSubsetName = $SubsetName.Replace("'", "''")
 
-    $sql = "INSERT INTO SqlSizerHistory.Subset([Guid], [Name]) VALUES('$guid', '$SubsetName') SELECT SCOPE_IDENTITY() as Id"
+    $sql = "INSERT INTO SqlSizerHistory.Subset([Guid], [Name]) VALUES('$guid', '$escapedSubsetName') SELECT SCOPE_IDENTITY() as Id"
     $result = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo
     $subsetId = $result.Id
 

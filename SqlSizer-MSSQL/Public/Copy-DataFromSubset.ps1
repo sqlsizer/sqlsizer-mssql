@@ -58,42 +58,47 @@ function Copy-DataFromSubset
         Disable-AllTablesTriggers -Database $Destination -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo
     }
 
-    foreach ($table in $subsetTables)
+    try
     {
-        $i += 1
-
-        $tableInfo = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
-        Write-Progress -Activity "Copying data" -PercentComplete (100 * ($i / ($subsetTables.Count))) -CurrentOperation "Table $($table.SchemaName).$($table.TableName)"
-
-        if ($tableInfo.IsHistoric -eq $true)
+        foreach ($table in $subsetTables)
         {
-            continue
+            $i += 1
+
+            $tableInfo = $DatabaseInfo.Tables | Where-Object { ($_.SchemaName -eq $table.SchemaName) -and ($_.TableName -eq $table.TableName) }
+            Write-Progress -Activity "Copying data" -PercentComplete (100 * ($i / ($subsetTables.Count))) -CurrentOperation "Table $($table.SchemaName).$($table.TableName)"
+
+            if ($tableInfo.IsHistoric -eq $true)
+            {
+                continue
+            }
+
+            $signature = $structure.Tables[$tableInfo]
+
+            $sql = New-CopyDataFromSubsetQuery `
+                -SessionId $SessionId `
+                -Source $Source `
+                -TableInfo $tableInfo `
+                -ProcessingTableName $signature `
+                -IgnoredTables $IgnoredTables `
+                -BatchSize $BatchSize `
+                -Resume ([bool]$Resume)
+
+            $sql = Add-CopyDataFromSubsetIdentityInsert -Sql $sql -TableInfo $tableInfo
+            $null = Invoke-SqlcmdEx -Sql $sql -Database $Destination -ConnectionInfo $ConnectionInfo
         }
 
-        $signature = $structure.Tables[$tableInfo]
-
-        $sql = New-CopyDataFromSubsetQuery `
-            -SessionId $SessionId `
-            -Source $Source `
-            -TableInfo $tableInfo `
-            -ProcessingTableName $signature `
-            -IgnoredTables $IgnoredTables `
-            -BatchSize $BatchSize `
-            -Resume ([bool]$Resume)
-
-        $sql = Add-CopyDataFromSubsetIdentityInsert -Sql $sql -TableInfo $tableInfo
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $Destination -ConnectionInfo $ConnectionInfo
+        if ($RebuildDeferredIndexes)
+        {
+            Invoke-CopyDataFromSubsetDeferredIndexes -Database $Destination -ConnectionInfo $ConnectionInfo
+        }
     }
-
-    if ($RebuildDeferredIndexes)
+    finally
     {
-        Invoke-CopyDataFromSubsetDeferredIndexes -Database $Destination -ConnectionInfo $ConnectionInfo
-    }
-
-    if ($ReenableConstraints -and $DisableConstraintsForLoad)
-    {
-        Enable-ForeignKeys -Database $Destination -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo
-        Enable-AllTablesTriggers -Database $Destination -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo
+        if ($ReenableConstraints -and $DisableConstraintsForLoad)
+        {
+            Enable-ForeignKeys -Database $Destination -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo
+            Enable-AllTablesTriggers -Database $Destination -ConnectionInfo $ConnectionInfo -DatabaseInfo $DatabaseInfo
+        }
     }
 
     Write-Progress -Activity "Copying data" -Completed

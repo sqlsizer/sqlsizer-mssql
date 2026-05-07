@@ -51,7 +51,11 @@ function Copy-UserTypes
 
         $nullability = if ([bool]$row["is_nullable"]) { "NULL" } else { "NOT NULL" }
         $sql = "CREATE TYPE $(ConvertTo-SqlIdentifier $schema).$(ConvertTo-SqlIdentifier $typeName) FROM $dataType $nullability"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        $result = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Silent $true
+        if ($result -eq $false)
+        {
+            Write-Warning "Skipped user type [$schema].[$typeName] in [$TargetDatabase]: it may already exist or reference an unavailable type."
+        }
     }
 
     Write-Progress -Activity "Copy user types" -Completed

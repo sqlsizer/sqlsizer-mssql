@@ -48,7 +48,11 @@ function Copy-Sequences
         $qualifiedName = "$(ConvertTo-SqlIdentifier $schema).$(ConvertTo-SqlIdentifier $name)"
         $qualifiedLiteral = ConvertTo-SqlStringLiteral "$schema.$name"
         $sql = "IF OBJECT_ID($qualifiedLiteral, 'SO') IS NULL BEGIN CREATE SEQUENCE $qualifiedName AS $($row["type"]) START WITH $($row["current_value"]) INCREMENT BY $($row["increment"]) $minimum $maximum $cycle END"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo
+        $result = Invoke-SqlcmdEx -Sql $sql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Silent $true
+        if ($result -eq $false)
+        {
+            Write-Warning "Skipped sequence [$schema].[$name] in [$TargetDatabase]: it may reference a type or value not available in the target database."
+        }
     }
     Write-Progress -Activity "Copying sequences" -Completed
 }
