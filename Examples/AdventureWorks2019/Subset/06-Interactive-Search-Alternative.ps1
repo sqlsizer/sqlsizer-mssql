@@ -42,11 +42,11 @@ do
             -DatabaseInfo $info -FullSearch $true `
             -UseDfs $false -SessionId $sessionId
 
-    $tables = Get-SubsetTableStatistics -Iteration $iteration -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+    $tables = Get-SubsetTableStatistics -Iteration $iteration -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
     foreach ($table in $tables)
     {
-        $rows = Get-SubsetTableRows -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId `
+        $rows = Get-SubsetTableRows -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId `
                 -Iteration $iteration -TableName $table.TableName -SchemaName $table.SchemaName `
                 -AllColumns $true
 

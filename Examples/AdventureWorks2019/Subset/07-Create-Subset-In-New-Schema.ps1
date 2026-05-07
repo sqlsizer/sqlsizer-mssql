@@ -44,13 +44,13 @@ Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($
 Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -SessionId $sessionId
 
 # Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 Write-Verbose "Logical reads from db during subsetting: $($connection.Statistics.LogicalReads)"
 
 $subsetId = (New-Guid).ToString().Replace('-', '_')
 
-New-SchemaFromSubset -Connection $connection -Database $database -DatabaseInfo $info -CopyData $true `
+New-SchemaFromSubset -ConnectionInfo $connection -Database $database -DatabaseInfo $info -CopyData $true `
                      -NewSchemaPrefix "SqlSizer_subset_$subsetId" `
                      -SessionId $sessionId
 

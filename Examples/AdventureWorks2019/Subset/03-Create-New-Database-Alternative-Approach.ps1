@@ -101,7 +101,7 @@ Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($
 Find-Subset -Database $database -ConnectionInfo $connection -DatabaseInfo $info -TraversalConfiguration $config -UseDfs $true -SessionId $sessionId
 
 # Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 # Create a new db with found subset of data
 

@@ -58,4 +58,4 @@ Enable-AllTablesTriggers -Database $database -ConnectionInfo $connection -Databa
 Test-ForeignKeys -Database $database -ConnectionInfo $connection -DatabaseInfo $info
 
 Write-Host "Following data has been removed:"
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId

@@ -22,8 +22,8 @@ function Test-ForeignKeys
 
         foreach ($fk in $table.ForeignKeys)
         {
-            $sql = "ALTER TABLE $($table.SchemaName).$($table.TableName) WITH CHECK CHECK CONSTRAINT $($fk.Name)"
-            $ok = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Silent $false -Statistics $false
+            $sql = "ALTER TABLE $(ConvertTo-SqlIdentifier $table.SchemaName).$(ConvertTo-SqlIdentifier $table.TableName) WITH CHECK CHECK CONSTRAINT $(ConvertTo-SqlIdentifier $fk.Name)"
+            $ok = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Silent $true -Statistics $false
 
             if ($ok -eq $false)
             {

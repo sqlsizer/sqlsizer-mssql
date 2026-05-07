@@ -43,11 +43,11 @@ Initialize-StartSet -Database $database -ConnectionInfo $connection -Queries @($
 Find-Subset -Database $database -ConnectionInfo $connection -IgnoredTables @($ignored) -DatabaseInfo $info -SessionId $sessionId
 
 # Get subset info
-Get-SubsetTables -Database $database -Connection $connection -DatabaseInfo $info -SessionId $sessionId
+Get-SubsetTables -Database $database -ConnectionInfo $connection -DatabaseInfo $info -SessionId $sessionId
 
 Write-Verbose "Logical reads from db during subsetting: $($connection.Statistics.LogicalReads)"
 
-New-DataTableFromSubsetTable -Connection $connection -Database $database -DatabaseInfo $info -CopyData $true `
+New-DataTableFromSubsetTable -ConnectionInfo $connection -Database $database -DatabaseInfo $info -CopyData $true `
                              -NewSchemaName "Person_subset_02" -NewTableName "Address" -SchemaName "Person" -TableName "Address" `
                              -SessionId $sessionId
                         
