@@ -65,7 +65,9 @@ function Install-SqlSizerCore
 
     foreach ($table in $DatabaseInfo.Tables)
     {
-        $tmp = "INSERT INTO SqlSizer.Tables VALUES('$($table.SchemaName)', '$($table.TableName)')"
+        $schemaEsc = $table.SchemaName.Replace("'", "''")
+        $tableEsc  = $table.TableName.Replace("'", "''")
+        $tmp = "INSERT INTO SqlSizer.Tables VALUES('$schemaEsc', '$tableEsc')"
         $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
     }
 
@@ -73,13 +75,19 @@ function Install-SqlSizerCore
     {
         foreach ($fk in $table.ForeignKeys)
         {
-            $tmp = "SELECT [Id] FROM SqlSizer.Tables WHERE [Schema] = '$($fk.FkSchema)' AND TableName = '$($fk.FkTable)'"
+            $fkSchemaEsc  = $fk.FkSchema.Replace("'", "''")
+            $fkTableEsc   = $fk.FkTable.Replace("'", "''")
+            $fkSchema2Esc = $fk.Schema.Replace("'", "''")
+            $fkTable2Esc  = $fk.Table.Replace("'", "''")
+            $fkNameEsc    = $fk.Name.Replace("'", "''")
+
+            $tmp = "SELECT [Id] FROM SqlSizer.Tables WHERE [Schema] = '$fkSchemaEsc' AND TableName = '$fkTableEsc'"
             $result = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
 
-            $tmp = "SELECT [Id] FROM SqlSizer.Tables WHERE [Schema] = '$($fk.Schema)' AND TableName = '$($fk.Table)'"
+            $tmp = "SELECT [Id] FROM SqlSizer.Tables WHERE [Schema] = '$fkSchema2Esc' AND TableName = '$fkTable2Esc'"
             $result2 = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
 
-            $tmp = "INSERT INTO SqlSizer.ForeignKeys VALUES($($result.Id), $($result2.Id), '$($fk.Name)')"
+            $tmp = "INSERT INTO SqlSizer.ForeignKeys VALUES($($result.Id), $($result2.Id), '$fkNameEsc')"
             $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo
         }
     }

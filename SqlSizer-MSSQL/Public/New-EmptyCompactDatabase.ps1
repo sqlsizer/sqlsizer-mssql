@@ -124,7 +124,11 @@ BEGIN
     CREATE XML SCHEMA COLLECTION $collectionSql AS N$definitionLiteral;
 END;
 "@
-        $null = Invoke-SqlcmdEx -Sql $createSql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false
+        $result = Invoke-SqlcmdEx -Sql $createSql -Database $TargetDatabase -ConnectionInfo $ConnectionInfo -Statistics $false -Silent $true
+        if ($result -eq $false)
+        {
+            Write-Warning "Skipped XML schema collection [$($row.SchemaName)].[$($row.CollectionName)] in [$TargetDatabase]: it may reference an unavailable schema or collation."
+        }
     }
 }
 
