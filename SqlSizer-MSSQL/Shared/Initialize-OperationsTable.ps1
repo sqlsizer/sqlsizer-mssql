@@ -35,11 +35,12 @@ function Initialize-OperationsTable
     })
 
     $tableIndex = 0
+    $batchBuilder = [System.Text.StringBuilder]::new()
     foreach ($table in $tables)
     {
         $tableIndex++
         Write-Progress -Activity "Initializing traversal operations $SessionId" `
-                       -Status "Counting seeded rows per table" `
+                       -Status "Building batched INSERTs" `
                        -CurrentOperation "$($table.SchemaName).$($table.TableName)" `
                        -PercentComplete ([int][Math]::Round(100 * ($tableIndex / [Math]::Max(1, $tables.Count))))
 
@@ -54,12 +55,16 @@ function Initialize-OperationsTable
 
         $tableId = $sqlSizerTable.Id
 
-        $sql = "INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [State], [Depth], [Created], [SessionId], [FoundIteration])
+        [void]$batchBuilder.AppendLine("INSERT INTO SqlSizer.Operations([Table], [ToProcess], [Processed], [Status], [State], [Depth], [Created], [SessionId], [FoundIteration])
         SELECT $tableId, COUNT_BIG(*), 0, NULL, p.[State], 0, GETDATE(), '$SessionId', $StartIteration
         FROM $($processing) p
         WHERE p.Iteration >= $StartIteration
-        GROUP BY [State]"
-        $null = Invoke-SqlcmdEx -Sql $sql -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
+        GROUP BY [State];")
+    }
+
+    if ($batchBuilder.Length -gt 0)
+    {
+        $null = Invoke-SqlcmdEx -Sql $batchBuilder.ToString() -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $Statistics
     }
 
     Write-Progress -Activity "Initializing traversal operations $SessionId" -Completed

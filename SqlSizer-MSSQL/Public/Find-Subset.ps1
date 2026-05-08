@@ -486,7 +486,12 @@ function Find-Subset
     foreach ($t in $DatabaseInfo.Tables) {
         $tablesByFullName["$($t.SchemaName), $($t.TableName)"] = $t
     }
-    
+
+    # Per-run caches for hot paths (Bottlenecks 3 and 4 in plan)
+    $ruleBranchCache = @{}
+    $cteQueryTemplateCache = @{}
+    $ITER_TOKEN = '/*__SQLSIZER_ITER__*/'
+
     #region Helper Functions
 
     function Test-FindSubsetIgnoredTable
@@ -762,7 +767,8 @@ function Find-Subset
                 $branchWatch = [System.Diagnostics.Stopwatch]::StartNew()
                 try
                 {
-                    $branches = Get-TraversalRuleBranches `
+                    $branches = Get-TraversalRuleBranchesCached `
+                        -Cache $ruleBranchCache `
                         -Direction $Direction `
                         -CurrentState $State `
                         -Fk $fk `
@@ -788,23 +794,44 @@ function Find-Subset
                         continue
                     }
 
-                    # Build CTE-based query using shared function
-                    $query = New-CTETraversalQuery `
-                        -SourceProcessing $processing `
-                        -TargetProcessing $targetProcessing `
-                        -SourceTable $Table `
-                        -TargetTable $targetTableInfo `
-                        -Fk $fk `
-                        -Direction $Direction `
-                        -NewState $newState `
-                        -SourceTableId $tableId `
-                        -TargetTableId $targetTableId `
-                        -FkId $fkId `
-                        -Constraints $branch.Constraints `
-                        -Iteration $Iteration `
-                        -SessionId $SessionId `
-                        -MaxBatchSize $MaxBatchSize `
-                        -FullSearch $FullSearch
+                    # Memoize the CTE template by (FK, Direction, NewState, Constraints).
+                    # Within a single Find-Subset run, only $Iteration changes between
+                    # calls for the same tuple - so we cache the template with a token
+                    # and substitute the iteration via a fast string Replace.
+                    $constraintsKey = Get-ConstraintsCacheKey -Constraints $branch.Constraints
+                    $cacheKey = "$fkId|$([int]$Direction)|$([int]$newState)|$constraintsKey"
+
+                    if ($cteQueryTemplateCache.ContainsKey($cacheKey))
+                    {
+                        $template = $cteQueryTemplateCache[$cacheKey]
+                    }
+                    else
+                    {
+                        $template = New-CTETraversalQuery `
+                            -SourceProcessing $processing `
+                            -TargetProcessing $targetProcessing `
+                            -SourceTable $Table `
+                            -TargetTable $targetTableInfo `
+                            -Fk $fk `
+                            -Direction $Direction `
+                            -NewState $newState `
+                            -SourceTableId $tableId `
+                            -TargetTableId $targetTableId `
+                            -FkId $fkId `
+                            -Constraints $branch.Constraints `
+                            -Iteration 0 `
+                            -SessionId $SessionId `
+                            -MaxBatchSize $MaxBatchSize `
+                            -FullSearch $FullSearch `
+                            -IterationLiteral $ITER_TOKEN
+                        $cteQueryTemplateCache[$cacheKey] = $template
+                    }
+
+                    $query = $template.Replace($ITER_TOKEN, [string]$Iteration)
+                    if ($query.Contains($ITER_TOKEN))
+                    {
+                        throw "Iteration token '$ITER_TOKEN' was not substituted in cached CTE query"
+                    }
 
                     $queryList.Add($query)
                     $generatedQueryCount += 1
@@ -943,20 +970,31 @@ function Find-Subset
 
         Write-Verbose "Marking remaining Pending states as Exclude for iteration $Iteration"
 
-        $excludedCount = 0
+        if ($userTablesWithPrimaryKey.Count -eq 0)
+        {
+            Write-Verbose "No user tables with primary keys; nothing to resolve"
+            return
+        }
 
-        # Mark ALL remaining Pending as Exclude (those not promoted to Include during traversal)
+        # Build one batched UPDATE wrapped in a shared @TotalExcluded accumulator
+        # so we collapse N round-trips into a single SQL execution.
+        $batchBuilder = [System.Text.StringBuilder]::new()
+        [void]$batchBuilder.AppendLine("DECLARE @TotalExcluded BIGINT = 0;")
         foreach ($table in $userTablesWithPrimaryKey)
         {
             $signature = $structure.Tables[$table]
             $processing = $structure.GetProcessingName($signature, $SessionId)
-            $query = New-ExcludePendingQuery -ProcessingTable $processing -TableInfo $table
+            $updateSql = New-ExcludePendingQuery -ProcessingTable $processing -TableInfo $table -Bare
+            [void]$batchBuilder.AppendLine($updateSql)
+            [void]$batchBuilder.AppendLine("SET @TotalExcluded = @TotalExcluded + @@ROWCOUNT;")
+        }
+        [void]$batchBuilder.AppendLine("SELECT @TotalExcluded AS ExcludedCount;")
 
-            $result = Invoke-FindSubsetSql -Sql $query -Phase "Resolving pending states: $($table.SchemaName).$($table.TableName)" -Iteration $Iteration -Table $table
-            if ($null -ne $result -and $null -ne $result.ExcludedCount)
-            {
-                $excludedCount += $result.ExcludedCount
-            }
+        $excludedCount = 0
+        $result = Invoke-FindSubsetSql -Sql $batchBuilder.ToString() -Phase "Resolving pending states (batched)" -Iteration $Iteration
+        if ($null -ne $result -and $null -ne $result.ExcludedCount)
+        {
+            $excludedCount = [long]$result.ExcludedCount
         }
 
         Write-Verbose "Marked $excludedCount Pending records as Exclude"

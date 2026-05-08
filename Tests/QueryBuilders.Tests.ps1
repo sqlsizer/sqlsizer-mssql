@@ -289,6 +289,52 @@ Describe 'New-ExcludePendingQuery' {
         $result | Should -Match '-- Mark remaining Pending as Exclude'
         $result | Should -Match 'dbo\.Orders'
     }
+
+    Context '-Bare switch (batched form)' {
+        It 'Emits only the UPDATE statement with no DECLARE/SELECT/GO' {
+            $result = New-ExcludePendingQuery `
+                -ProcessingTable 'SqlSizer.Processing_Orders' `
+                -TableInfo $mockTableInfo `
+                -Bare
+
+            $result | Should -Match '^UPDATE \[SqlSizer\]\.\[Processing_Orders\] SET \[State\] = 2 WHERE \[State\] = 3;\s*$'
+            $result | Should -Not -Match 'DECLARE'
+            $result | Should -Not -Match 'SELECT'
+            $result | Should -Not -Match 'GO'
+            $result | Should -Not -Match '--'
+        }
+
+        It 'Uses Pending = 3 and Exclude = 2 state values' {
+            $result = New-ExcludePendingQuery `
+                -ProcessingTable 'SqlSizer.Processing_Orders' `
+                -TableInfo $mockTableInfo `
+                -Bare
+
+            $result | Should -Match 'SET \[State\] = 2'
+            $result | Should -Match 'WHERE \[State\] = 3'
+        }
+
+        It 'Properly escapes processing table names with dots' {
+            $result = New-ExcludePendingQuery `
+                -ProcessingTable 'SqlSizer_S1.dbo_Orders' `
+                -TableInfo $mockTableInfo `
+                -Bare
+
+            $result | Should -Match '\[SqlSizer_S1\]\.\[dbo_Orders\]'
+        }
+
+        It 'Returns a single statement (concatenatable into a batch)' {
+            $a = New-ExcludePendingQuery -ProcessingTable 'SqlSizer.A' -TableInfo $mockTableInfo -Bare
+            $b = New-ExcludePendingQuery -ProcessingTable 'SqlSizer.B' -TableInfo $mockTableInfo -Bare
+
+            # Each result must end with a semicolon
+            $a | Should -Match ';\s*$'
+            $b | Should -Match ';\s*$'
+            # And concatenation must yield exactly two UPDATE statements
+            $combined = "$a`n$b"
+            ([regex]::Matches($combined, 'UPDATE ')).Count | Should -Be 2
+        }
+    }
 }
 
 Describe 'New-CTETraversalQuery - Structure Tests' {
@@ -791,6 +837,101 @@ Describe 'New-CTETraversalQuery - Structure Tests' {
             # For incoming: source columns = FK columns (2), target columns = target PK (2)
             # SourceRecords should have Key0, Key1
             $result | Should -Match 'SELECT src\.Key0, src\.Key1, src\.Depth, src\.Fk'
+        }
+    }
+
+    Context 'IterationLiteral substitution (template caching)' {
+        It 'Falls back to integer Iteration when IterationLiteral is not provided' {
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable `
+                -TargetTable $mockTargetTable `
+                -Fk $mockFk `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 7 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false
+
+            # Iteration value 7 should appear in the INSERT and Operations INSERT
+            $result | Should -Match ', 1, Depth, 10, 7\b'
+            $result | Should -Match 'Iteration = 7\b'
+        }
+
+        It 'Substitutes IterationLiteral verbatim wherever Iteration appears' {
+            $token = '/*__SQLSIZER_ITER__*/'
+            $result = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable `
+                -TargetTable $mockTargetTable `
+                -Fk $mockFk `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 0 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false `
+                -IterationLiteral $token
+
+            # Token must appear in all three iteration positions:
+            #   1) INSERT into target processing table (FoundIteration column)
+            #   2) UPDATE existing rows (Iteration column)
+            #   3) INSERT into SqlSizer.Operations (FoundIteration column)
+            ([regex]::Matches($result, [regex]::Escape($token))).Count | Should -BeGreaterOrEqual 2
+            $result | Should -Match ([regex]::Escape("Iteration = $token"))
+        }
+
+        It 'Produces structurally identical SQL across two calls with different IterationLiteral' {
+            $a = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable -TargetTable $mockTargetTable `
+                -Fk $mockFk -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 0 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false `
+                -IterationLiteral '__A__'
+
+            $b = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable -TargetTable $mockTargetTable `
+                -Fk $mockFk -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 0 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false `
+                -IterationLiteral '__B__'
+
+            $a.Replace('__A__', 'X') | Should -Be $b.Replace('__B__', 'X')
+        }
+
+        It 'Round-trips: Replace token with integer matches direct call with that integer' {
+            $template = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable -TargetTable $mockTargetTable `
+                -Fk $mockFk -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 0 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false `
+                -IterationLiteral '/*__ITER__*/'
+            $hydrated = $template.Replace('/*__ITER__*/', '42')
+
+            $direct = New-CTETraversalQuery `
+                -SourceProcessing 'SqlSizer.Proc_Source' `
+                -TargetProcessing 'SqlSizer.Proc_Target' `
+                -SourceTable $mockSourceTable -TargetTable $mockTargetTable `
+                -Fk $mockFk -Direction ([TraversalDirection]::Outgoing) `
+                -NewState ([TraversalState]::Include) `
+                -SourceTableId 1 -TargetTableId 2 -FkId 10 `
+                -Constraints @{} -Iteration 42 `
+                -SessionId 'TEST' -MaxBatchSize -1 -FullSearch $false
+
+            $hydrated | Should -Be $direct
         }
     }
 }

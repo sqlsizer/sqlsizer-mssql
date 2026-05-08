@@ -996,3 +996,190 @@ Describe 'TraversalConfiguration Convenience Methods' {
         }
     }
 }
+
+Describe 'Get-ConstraintsCacheKey' {
+    It 'Returns the same key for two equivalent hashtables' {
+        $a = @{ MaxDepth = 3; Filter = "[X]=1"; PriorFilters = @('p1','p2') }
+        $b = @{ MaxDepth = 3; Filter = "[X]=1"; PriorFilters = @('p1','p2') }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+
+    It 'Returns different keys when MaxDepth differs' {
+        $a = @{ MaxDepth = 3; Filter = $null; PriorFilters = @() }
+        $b = @{ MaxDepth = 5; Filter = $null; PriorFilters = @() }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Not -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+
+    It 'Returns different keys when Filter differs' {
+        $a = @{ MaxDepth = $null; Filter = "[X]=1"; PriorFilters = @() }
+        $b = @{ MaxDepth = $null; Filter = "[X]=2"; PriorFilters = @() }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Not -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+
+    It 'Returns different keys when PriorFilters order differs' {
+        $a = @{ MaxDepth = $null; Filter = $null; PriorFilters = @('a','b') }
+        $b = @{ MaxDepth = $null; Filter = $null; PriorFilters = @('b','a') }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Not -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+
+    It 'Handles null Constraints by returning a stable sentinel' {
+        Get-ConstraintsCacheKey -Constraints $null | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Handles all-null fields without throwing' {
+        $c = @{ MaxDepth = $null; Filter = $null; PriorFilters = $null }
+        { Get-ConstraintsCacheKey -Constraints $c } | Should -Not -Throw
+    }
+
+    It 'Does not collide on filters containing commas or pipes' {
+        # If the impl naively joined with "," or "|", these would collide.
+        # Using control-character separators inside means these stay distinct.
+        $a = @{ MaxDepth = $null; Filter = $null; PriorFilters = @('a,b','c') }
+        $b = @{ MaxDepth = $null; Filter = $null; PriorFilters = @('a','b,c') }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Not -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+
+    It 'Does not collide on filter containing the string "_"' {
+        # The all-null sentinel is "_" - a real filter containing literal "_"
+        # must not collide with the "no filter" case.
+        $a = @{ MaxDepth = $null; Filter = '_'; PriorFilters = @() }
+        $b = @{ MaxDepth = $null; Filter = $null; PriorFilters = @() }
+
+        Get-ConstraintsCacheKey -Constraints $a | Should -Not -Be (Get-ConstraintsCacheKey -Constraints $b)
+    }
+}
+
+Describe 'Get-TraversalRuleBranchesCached' {
+    BeforeAll {
+        $script:fk = New-Object TableFk
+        $script:fk.Schema = 'dbo'
+        $script:fk.Table = 'Orders'
+        $script:fk.FkSchema = 'dbo'
+        $script:fk.FkTable = 'Customers'
+        $script:fk.Name = 'FK_Orders_Customers'
+        $script:fk.FkColumns = New-Object 'System.Collections.Generic.List[ColumnInfo]'
+    }
+
+    It 'Calls Get-TraversalRuleBranches only once for the same cache key' {
+        $cache = @{}
+
+        $first = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $second = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $cache.Count | Should -Be 1
+        # Same cached object should be returned
+        [object]::ReferenceEquals($first, $second) | Should -BeTrue
+    }
+
+    It 'Recomputes when Direction differs' {
+        $cache = @{}
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Incoming) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $cache.Count | Should -Be 2
+    }
+
+    It 'Recomputes when CurrentState differs' {
+        $cache = @{}
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Pending) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $cache.Count | Should -Be 2
+    }
+
+    It 'Recomputes when ForeignKeyName differs' {
+        $cache = @{}
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName 'FK_A' `
+            -FullSearch $false
+
+        $null = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName 'FK_B' `
+            -FullSearch $false
+
+        $cache.Count | Should -Be 2
+    }
+
+    It 'Cache survives across iterations of a foreach loop' {
+        $cache = @{}
+
+        for ($i = 0; $i -lt 10; $i++) {
+            $null = Get-TraversalRuleBranchesCached -Cache $cache `
+                -Direction ([TraversalDirection]::Outgoing) `
+                -CurrentState ([TraversalState]::Include) `
+                -Fk $script:fk `
+                -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+                -FullSearch $false
+        }
+
+        $cache.Count | Should -Be 1
+    }
+
+    It 'Returns a result equivalent to Get-TraversalRuleBranches' {
+        $cache = @{}
+
+        $cached = Get-TraversalRuleBranchesCached -Cache $cache `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $direct = Get-TraversalRuleBranches `
+            -Direction ([TraversalDirection]::Outgoing) `
+            -CurrentState ([TraversalState]::Include) `
+            -Fk $script:fk `
+            -SourceSchemaName 'dbo' -SourceTableName 'Orders' -ForeignKeyName $script:fk.Name `
+            -FullSearch $false
+
+        $cached.Count | Should -Be $direct.Count
+        $cached[0].NewState | Should -Be $direct[0].NewState
+    }
+}

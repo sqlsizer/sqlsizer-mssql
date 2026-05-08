@@ -326,6 +326,120 @@ function Get-TraversalRuleBranches
     return ,$branches.ToArray()
 }
 
+function Get-ConstraintsCacheKey
+{
+    <#
+    .SYNOPSIS
+        Builds a deterministic, collision-free string key from a traversal
+        constraints hashtable.
+    .DESCRIPTION
+        Used together with the (FK, Direction, NewState) tuple as a cache
+        key for memoizing CTE traversal query templates. Filters can contain
+        arbitrary SQL, including any printable character.
+
+        Encoding uses control characters that cannot appear in SQL text:
+        - Field separator: Record Separator (0x1E)
+        - Element separator: Unit Separator (0x1F)
+        - Null marker: NUL (0x00) - SQL text cannot contain NUL bytes,
+          so distinguishes "field is null" from "field is the literal '_'"
+        - Value marker: SOH (0x01) prefixed before non-null values
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [hashtable]$Constraints
+    )
+
+    $nul = [char]0x00
+    $soh = [char]0x01
+    $rs  = [char]0x1E
+    $us  = [char]0x1F
+
+    if ($null -eq $Constraints)
+    {
+        return $nul
+    }
+
+    $maxDepth = if ($null -ne $Constraints.MaxDepth) { "$soh$([string]$Constraints.MaxDepth)" } else { "$nul" }
+    $filter   = if ($null -ne $Constraints.Filter)   { "$soh$([string]$Constraints.Filter)"   } else { "$nul" }
+
+    $priorsValue = $Constraints.PriorFilters
+    $priors = if ($null -ne $priorsValue) {
+        $items = [string[]]$priorsValue | ForEach-Object { "$soh$_" }
+        "$soh$(($items) -join $us)"
+    } else {
+        "$nul"
+    }
+
+    return "$maxDepth$rs$filter$rs$priors"
+}
+
+function Get-TraversalRuleBranchesCached
+{
+    <#
+    .SYNOPSIS
+        Memoized wrapper around Get-TraversalRuleBranches.
+    .DESCRIPTION
+        Within a single Find-Subset run, TraversalConfiguration and FullSearch are
+        constants, so the result of Get-TraversalRuleBranches is fully determined
+        by (Direction, CurrentState, SourceSchema, SourceTable, ForeignKeyName).
+        Stores results in the supplied $Cache hashtable.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable[]])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Cache,
+
+        [Parameter(Mandatory = $true)]
+        [TraversalDirection]$Direction,
+
+        [Parameter(Mandatory = $true)]
+        [TraversalState]$CurrentState,
+
+        [Parameter(Mandatory = $true)]
+        [TableFk]$Fk,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceSchemaName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourceTableName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ForeignKeyName,
+
+        [Parameter(Mandatory = $false)]
+        [TraversalConfiguration]$TraversalConfiguration,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$FullSearch = $false
+    )
+
+    $key = "$([int]$Direction)|$([int]$CurrentState)|$SourceSchemaName|$SourceTableName|$ForeignKeyName"
+    if ($Cache.ContainsKey($key))
+    {
+        return ,$Cache[$key]
+    }
+
+    $branches = Get-TraversalRuleBranches `
+        -Direction $Direction `
+        -CurrentState $CurrentState `
+        -Fk $Fk `
+        -SourceSchemaName $SourceSchemaName `
+        -SourceTableName $SourceTableName `
+        -ForeignKeyName $ForeignKeyName `
+        -TraversalConfiguration $TraversalConfiguration `
+        -FullSearch $FullSearch
+
+    $Cache[$key] = $branches
+    return ,$branches
+}
+
 function Get-TraversalConstraints
 {
     <#
@@ -783,6 +897,8 @@ function Get-IncludedTraversalStateSqlList
 Export-ModuleMember -Function @(
     'Get-DefaultTraversalState',
     'Get-TraversalRuleBranches',
+    'Get-TraversalRuleBranchesCached',
+    'Get-ConstraintsCacheKey',
     'Get-NewTraversalState',
     'Get-TraversalConstraints',
     'Test-TraversalConstraintsMatch',

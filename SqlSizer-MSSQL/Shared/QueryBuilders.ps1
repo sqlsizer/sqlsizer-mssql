@@ -95,17 +95,25 @@ function New-CTETraversalQuery
         
         [Parameter(Mandatory = $true)]
         [int]$Iteration,
-        
+
         [Parameter(Mandatory = $true)]
         [string]$SessionId,
-        
+
         [Parameter(Mandatory = $true)]
         [int]$MaxBatchSize,
-        
+
         [Parameter(Mandatory = $true)]
-        [bool]$FullSearch
+        [bool]$FullSearch,
+
+        # Optional placeholder string substituted wherever Iteration appears as
+        # a SQL literal, allowing callers to memoize the query template and
+        # cheap-replace just the iteration value across iterations.
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$IterationLiteral = $null
     )
 
+    $iterLit = if ([string]::IsNullOrEmpty($IterationLiteral)) { [string]$Iteration } else { $IterationLiteral }
     $sourceProcessingSql = ConvertTo-SqlMultipartIdentifier $SourceProcessing
     $targetProcessingSql = ConvertTo-SqlMultipartIdentifier $TargetProcessing
     $sourceTableSql = (ConvertTo-SqlIdentifier $SourceTable.SchemaName) + "." + (ConvertTo-SqlIdentifier $SourceTable.TableName)
@@ -298,7 +306,7 @@ NewRecords AS (
 )
 INSERT INTO $targetProcessingSql ($targetKeyListForInsert, [State], Source, Depth, Fk, Iteration)
 OUTPUT inserted.Depth INTO @InsertedRows
-SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $Iteration
+SELECT $targetKeyListForInsert, $([int]$NewState), $SourceTableId, Depth, $FkId, $iterLit
 FROM NewRecords;
 
 -- Promote existing records when a stronger include path finds them
@@ -314,7 +322,7 @@ SET [State] = $([int]$NewState),
     Source = $SourceTableId,
     Fk = $FkId,
     Depth = nr.Depth,
-    Iteration = $Iteration
+    Iteration = $iterLit
 OUTPUT inserted.Depth INTO @InsertedRows
 FROM $targetProcessingSql existing
 INNER JOIN (
@@ -346,7 +354,7 @@ SELECT
     GETDATE(),
     NULL, 
     $sessionIdLiteral,
-    $Iteration, 
+    $iterLit,
     NULL
 FROM @InsertedRows
 GROUP BY Depth;
@@ -366,6 +374,10 @@ function New-ExcludePendingQuery
     .DESCRIPTION
         Pure function that generates SQL for marking all Pending
         records as Exclude after resolution attempts.
+
+        With -Bare, emits only the UPDATE statement so callers can
+        concatenate many such statements into a single batched
+        execution wrapped by a shared accumulator.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -373,14 +385,22 @@ function New-ExcludePendingQuery
     (
         [Parameter(Mandatory = $true)]
         [string]$ProcessingTable,
-        
+
         [Parameter(Mandatory = $true)]
-        [object]$TableInfo
+        [object]$TableInfo,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Bare
     )
 
     $pendingState = [int][TraversalState]::Pending
     $excludeState = [int][TraversalState]::Exclude
     $processingTableSql = ConvertTo-SqlMultipartIdentifier $ProcessingTable
+
+    if ($Bare)
+    {
+        return "UPDATE $processingTableSql SET [State] = $excludeState WHERE [State] = $pendingState;"
+    }
 
     $query = @"
 -- Mark remaining Pending as Exclude for $($TableInfo.SchemaName).$($TableInfo.TableName)
