@@ -490,6 +490,12 @@ function Find-Subset
     # Per-run caches for hot paths (Bottlenecks 3 and 4 in plan)
     $ruleBranchCache = @{}
     $cteQueryTemplateCache = @{}
+    # Table-level cache for the full concatenated New-TraversalQuery output.
+    # Within a single Find-Subset run only $Iteration changes between calls
+    # for the same (Table, Direction, State), so the entire emitted SQL can
+    # be memoized and rehydrated with one string Replace per call. This is
+    # the dominant win for tables with many incoming FKs.
+    $traversalQueryCache = @{}
     $ITER_TOKEN = '/*__SQLSIZER_ITER__*/'
 
     #region Helper Functions
@@ -716,6 +722,33 @@ function Find-Subset
         $ruleBranchElapsedMs = [double]0
         $generatedSql = ""
 
+        # Table-level cache check: the entire emitted SQL for a given
+        # (Table, Direction, State) is identical across iterations except for
+        # the iteration literal. On cache hit we skip the FK foreach entirely.
+        $tableCacheKey = "$($Table.SchemaName)|$($Table.TableName)|$([int]$Direction)|$([int]$State)"
+        if ($traversalQueryCache.ContainsKey($tableCacheKey))
+        {
+            $cachedTemplate = $traversalQueryCache[$tableCacheKey]
+            $generatedSql = $cachedTemplate.Replace($ITER_TOKEN, [string]$Iteration)
+            try
+            {
+                return $generatedSql
+            }
+            finally
+            {
+                $buildWatch.Stop()
+                Add-FindSubsetPerformanceSample `
+                    -Category 'PowerShell' `
+                    -Phase "Building $directionText traversal SQL (cache hit)" `
+                    -Iteration $Iteration `
+                    -Operation $Operation `
+                    -Table $Table `
+                    -Direction $directionText `
+                    -ElapsedMs $buildWatch.Elapsed.TotalMilliseconds `
+                    -SqlChars $generatedSql.Length
+            }
+        }
+
         $queryList = [System.Collections.Generic.List[string]]::new()
         $tableId = $tablesGroupedByName["$($Table.SchemaName), $($Table.TableName)"].Id
         $processing = $structure.GetProcessingName($structure.Tables[$Table], $SessionId)
@@ -827,13 +860,9 @@ function Find-Subset
                         $cteQueryTemplateCache[$cacheKey] = $template
                     }
 
-                    $query = $template.Replace($ITER_TOKEN, [string]$Iteration)
-                    if ($query.Contains($ITER_TOKEN))
-                    {
-                        throw "Iteration token '$ITER_TOKEN' was not substituted in cached CTE query"
-                    }
-
-                    $queryList.Add($query)
+                    # Keep the iteration token embedded so the joined output
+                    # can be cached as a template and substituted just once.
+                    $queryList.Add($template)
                     $generatedQueryCount += 1
                     $emittedForFk = $true
                 }
@@ -844,7 +873,13 @@ function Find-Subset
                 }
             }
 
-            $generatedSql = ($queryList -join "`n")
+            $joinedTemplate = ($queryList -join "`n")
+            $traversalQueryCache[$tableCacheKey] = $joinedTemplate
+            $generatedSql = $joinedTemplate.Replace($ITER_TOKEN, [string]$Iteration)
+            if ($generatedSql.Contains($ITER_TOKEN))
+            {
+                throw "Iteration token '$ITER_TOKEN' was not substituted in concatenated traversal SQL"
+            }
             return $generatedSql
         }
         finally
@@ -1584,6 +1619,7 @@ WHERE Status = 0 AND SessionId = '$SessionId';
         {
             $startTime = Get-Date
             $progressStats = Get-IterationStatistics -Iteration $Iteration -StartTime $startTime
+            $progressState = @{ LastOperation = $null; LastTable = $null }
             $hasMoreWork = Invoke-SearchIteration -Iteration $Iteration
 
             # Resolve Pending states when traversal is complete

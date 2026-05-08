@@ -319,9 +319,9 @@ Describe 'Find-Subset progress source wiring' {
 
         $script | Should -Match 'Get-FindSubsetProgressStatus'
         $script | Should -Match 'Get-FindSubsetProgressCurrentOperation'
-        $script | Should -Match '-Status \$progressStatus'
-        $script | Should -Match '-CurrentOperation \$progressOperation'
-        $script | Should -Match 'elapsed \$elapsed'
+        $script | Should -Match '-Status \$statsStatus'
+        $script | Should -Match '-Status \$operationStatus'
+        $script | Should -Match 'elapsed \$elapsedFormatted'
         $script | Should -Match 'Invoke-FindSubsetSql'
         $script | Should -Match 'Executing traversal SQL'
         $script | Should -Match 'CollectSqlStatistics = \$false'
