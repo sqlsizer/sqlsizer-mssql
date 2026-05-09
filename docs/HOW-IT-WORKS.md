@@ -718,41 +718,177 @@ The algorithm uses **Breadth-First Search (BFS)** by default. The legacy `UseDfs
 
 **Algorithm Loop (Pseudocode):**
 
+The loop fetches **`OperationBatchSize` operations per iteration** (default `8`) so the four SQL round-trips below are amortized across `K` operations instead of paid per-operation. With the table-level template cache, the per-operation SQL build is also a single hashtable lookup + string Replace once warm.
+
 ```
 Build hashtable lookups for tables, FKs (O(1) access)
+Initialize per-run caches:
+    $ruleBranchCache         (memoizes Get-TraversalRuleBranches)
+    $cteQueryTemplateCache   (memoizes per-FK CTE templates with __ITER__ token)
+    $traversalQueryCache     (memoizes the joined per-(Table,Direction,State) SQL)
+    $traversalCacheStats     (Hits, Misses, HitElapsedMs, MissElapsedMs)
 
 WHILE unprocessed operations exist:
-    1. Get-NextOperation: SELECT TOP 1 from Operations
+    1. Get-NextOperationsBatch: SELECT TOP K from Operations         ── 1 round-trip
+       - K = OperationBatchSize (default 8)
        - BFS: ORDER BY Depth ASC, RemainingRecords DESC
        - UseDfs legacy ordering: ORDER BY RemainingRecords DESC
+       - Each row is a distinct (Table, State, Depth) group
 
-    2. Set-OperationInProgress: Mark Status = 0, advance Processed count
+    2. Set-OperationsBatchInProgress: one batch, K MARK statements    ── 1 round-trip
+       - Each statement preserves the existing per-op MaxBatchSize
+         WHILE-loop semantics; concatenated into one SQL execution.
 
-    3. Invoke-TraversalOperation:
-       a. Test-ShouldTraverseDirection for outgoing
-       b. Test-ShouldTraverseDirection for incoming
-       c. For each direction enabled:
-          - Generate CTE queries for matching FKs
-          - Batch all FK queries into single SQL execution
-       d. Execute batched SQL (reduces round-trips)
+    3. Invoke-TraversalOperationsBatch:                               ── 1 round-trip
+       For each operation in the batch:
+         a. Test-ShouldTraverseDirection for outgoing/incoming
+         b. For each enabled direction:
+            - Build CTE SQL via New-TraversalQuery
+              - HIT  $traversalQueryCache → string-Replace token, done
+              - MISS → iterate FKs, hit/fill $cteQueryTemplateCache
+                        and $ruleBranchCache, then cache joined output
+            - Append SQL to a single StringBuilder
+       Execute the concatenated SQL once. T-SQL within a batch runs
+       sequentially, so cross-op NOT EXISTS checks see prior ops' INSERTs.
 
-    4. Complete-Operations:
-       - If batch fully processed: Status → 1 (complete)
-       - If batch limit hit: Status → NULL (re-queue)
+    4. Complete-Operations: session-wide UPDATE                       ── 1 round-trip
+       - Status = 0 + ToProcess = Processed → Status = 1 (complete)
+       - Status = 0 + ToProcess <> Processed → Status = NULL (re-queue)
 
-    5. Resolve-PendingStates (compatibility/candidate cleanup):
-       - UPDATE remaining Pending → Exclude in processing tables
+    5. Save checkpoint (every CheckpointInterval iterations)
 
-    6. Save checkpoint (every CheckpointInterval iterations)
+    6. Increment iteration counter
 
-    7. Increment iteration counter
+After loop exits:
+    Resolve-PendingStates: one batched UPDATE across all user PK tables
+    Final subset guard check
+    Write final checkpoint
 ```
+
+**Per-iteration round-trip math** (K = OperationBatchSize):
+
+| Phase | Round-trips per iteration | Round-trips per K operations |
+|-------|---------------------------|------------------------------|
+| Get-NextOperationsBatch | 1 | 1 |
+| Set-OperationsBatchInProgress | 1 | 1 |
+| Invoke-TraversalOperationsBatch | 1 | 1 |
+| Complete-Operations | 1 | 1 |
+| **Total** | **4** | **4** |
+
+For 300 operations with K=8: ~38 iterations × 4 round-trips = **152 round-trips**, vs **1,200+** with K=1.
 
 **Traversal order:**
 | Algorithm | Parameter | `ORDER BY` | Best For |
 |-----------|-----------|------------|----------|
 | **BFS** | `UseDfs = $false` | `Depth ASC, RemainingRecords DESC` | Even discovery, predictable progress |
 | **Legacy size-first** | `UseDfs = $true` | `RemainingRecords DESC` | Prioritizing the largest queued operation |
+
+#### Worked example — one iteration end-to-end
+
+A run that already discovered customers and started traversal. `OperationBatchSize = 8`, BFS mode, default `MaxBatchSize = -1`.
+
+**State at start of iteration 5:**
+
+```
+SqlSizer.Operations (Status IS NULL rows):
+┌────────┬───────┬───────┬─────────────┬───────────┐
+│ Table  │ State │ Depth │ ToProcess   │ Processed │
+├────────┼───────┼───────┼─────────────┼───────────┤
+│ Order  │  1    │   2   │   142       │     0     │
+│ Order  │  1    │   3   │   58        │     0     │
+│ Item   │  1    │   3   │   400       │     0     │
+│ Item   │  1    │   4   │   12        │     0     │
+│ Address│  1    │   2   │   71        │     0     │
+│ Phone  │  1    │   3   │   33        │     0     │
+└────────┴───────┴───────┴─────────────┴───────────┘
+```
+
+**Step 1 — Get-NextOperationsBatch** (1 round-trip)
+
+```sql
+SELECT TOP 8
+    o.[Table] AS TableId, t.[Schema] AS TableSchema, t.TableName,
+    o.[State] AS State, o.Depth,
+    SUM(o.ToProcess - o.Processed) AS RemainingRecords
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.Status IS NULL AND o.SessionId = 'abc123'
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
+ORDER BY o.Depth ASC, RemainingRecords DESC
+```
+
+Returns 6 rows (everything pending). PowerShell wraps each into a `TraversalOperation` object.
+
+**Step 2 — Set-OperationsBatchInProgress** (1 round-trip)
+
+Concatenated MARK SQL — one UPDATE per `(Table, State, Depth)` group, all in one batch:
+
+```sql
+UPDATE SqlSizer.Operations
+SET Status = 0, ProcessedIteration = Processed, Processed = ToProcess
+WHERE [Table] = 12 AND [State] = 1 AND Depth = 2
+    AND Status IS NULL AND SessionId = 'abc123';
+UPDATE SqlSizer.Operations
+SET Status = 0, ProcessedIteration = Processed, Processed = ToProcess
+WHERE [Table] = 12 AND [State] = 1 AND Depth = 3
+    AND Status IS NULL AND SessionId = 'abc123';
+-- ... (one MARK per operation, total 6) ...
+```
+
+**Step 3 — Invoke-TraversalOperationsBatch** (1 round-trip)
+
+For each of the 6 operations, build outgoing + incoming SQL via `New-TraversalQuery`. Each call hits the table-level cache (after the first visit to that tuple), returning cached SQL with the iteration token already substituted to `5`. The 12 SQL fragments are joined into one batch. Per-FK fragments look like:
+
+```sql
+-- Traverse OUTGOING FK: FK_Order_Customer (cached template, ITER replaced with 5)
+WITH SourceRecordCandidates AS (
+    SELECT src.Key0, src.Depth, src.Fk, o.Id AS OperationId, ...
+    FROM [SqlSizer_abc123].[Sales_Order] src
+    INNER JOIN SqlSizer.Operations o ON
+        o.[Table] = 12 AND o.[State] = src.[State] AND o.Depth = src.Depth
+        AND o.FoundIteration = src.Iteration AND ... AND o.Status = 0
+        AND o.SessionId = 'abc123'
+),
+SourceRecords AS (...),
+NewRecords AS (
+    SELECT DISTINCT tgt.[CustomerID] AS Key0, src.Depth + 1 AS Depth
+    FROM [Sales].[Customer] tgt
+    INNER JOIN [Sales].[Order] srcTable ON srcTable.CustomerID = tgt.CustomerID
+    INNER JOIN SourceRecords src ON src.Key0 = srcTable.OrderID
+    WHERE tgt.CustomerID IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM [SqlSizer_abc123].[Sales_Customer] existing
+                        WHERE existing.Key0 = tgt.CustomerID)
+)
+INSERT INTO [SqlSizer_abc123].[Sales_Customer] (Key0, [State], Source, Depth, Fk, Iteration)
+OUTPUT inserted.Depth INTO @InsertedRows
+SELECT Key0, 1, 12, Depth, 33, 5      -- ← '5' is the substituted iteration
+FROM NewRecords;
+
+INSERT INTO SqlSizer.Operations (...)
+SELECT 11, 1, COUNT_BIG(*), 0, NULL, 12, 33, Depth, GETDATE(),
+       NULL, 'abc123', 5, NULL              -- ← '5' again
+FROM @InsertedRows GROUP BY Depth;
+GO
+```
+
+All 12 fragments execute sequentially in one round-trip. New rows discovered by Order's traversal land in target processing tables and `SqlSizer.Operations` immediately, so any later fragment in the same batch already sees them.
+
+**Step 4 — Complete-Operations** (1 round-trip)
+
+```sql
+-- Reset partially-processed operations (only matters with MaxBatchSize > 0)
+UPDATE SqlSizer.Operations SET Status = NULL, ProcessedIteration = NULL
+WHERE Status = 0 AND ToProcess <> Processed AND SessionId = 'abc123';
+
+-- Mark fully-processed operations as complete
+UPDATE SqlSizer.Operations
+SET Status = 1, ProcessedIteration = 5, ProcessedDate = GETDATE()
+WHERE Status = 0 AND SessionId = 'abc123';
+```
+
+All 6 operations are now `Status = 1` (complete). New operations inserted in step 3 (e.g., depth-3 Customer rows) appear with `Status IS NULL`, ready for the next iteration.
+
+**Total iteration cost: 4 SQL round-trips for 6 operations.** Without operation batching, the same work would have cost 24 round-trips (4 per operation × 6 operations). With the table-level cache warm, the PowerShell side of step 3 is just 12 hashtable lookups + 12 string `Replace` calls (~5 ms total) instead of 12 full CTE rebuilds (~50 ms).
 
 ### Phase 3: Output Closure
 
@@ -1420,19 +1556,89 @@ Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
 - After execution, `Complete-Operations` resets partially-complete operations to `Status = NULL` for re-queuing
 - This bounds memory usage and prevents any single SQL statement from running too long
 
+### Operation Batching (OperationBatchSize)
+
+Controls how many distinct operation groups are processed per iteration of the main loop. The whole `Get → Mark → Traverse → Complete` cycle is amortized across `K` operations instead of paid per-operation.
+
+```powershell
+# Default: 8 operations per iteration
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn
+
+# Larger batch (more aggressive amortization, more memory per iteration)
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -OperationBatchSize 16
+
+# Disable batching (legacy one-op-per-iteration behavior, useful for debugging)
+Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -OperationBatchSize 1
+```
+
+**Why batching is safe:** T-SQL statements within a single batch execute **sequentially**. If operation A's INSERT discovers new rows in a target processing table, operation B's `NOT EXISTS` lookup against that same table sees A's inserts.
+
+**Distinct from `MaxBatchSize`:**
+
+| Parameter | Bounds | Effect |
+|-----------|--------|--------|
+| `MaxBatchSize` | Rows processed per operation | Splits a single large operation across multiple SQL statements |
+| `OperationBatchSize` | Operations per loop iteration | Combines multiple independent operations into a single SQL execution |
+
+The two compose: with `MaxBatchSize=10000` and `OperationBatchSize=8`, each iteration fetches 8 operation groups, each capped at 10,000 rows.
+
+**Worked example — 300 operations:**
+
+| `OperationBatchSize` | Iterations | Round-trips per iteration | Total round-trips |
+|----------------------|-----------:|--------------------------:|------------------:|
+| 1 (legacy)           |        300 |                         4 |             1,200 |
+| 4                    |         75 |                         4 |               300 |
+| 8 (default)          |         38 |                         4 |              ~152 |
+| 16                   |         19 |                         4 |               ~76 |
+
+Each round-trip carries fixed network + parse + statistics overhead, so reducing total round-trips translates fairly directly into wall-clock improvement once the table-level cache is warm.
+
 ### Query Caching
 
-Generated SQL is cached to avoid re-generating complex CTE queries:
+`Find-Subset` builds large CTE-based SQL queries on every iteration. To avoid rebuilding the same SQL hundreds of times, three layered caches live in the `Find-Subset` closure (re-created per `Find-Subset` invocation):
 
+| Cache | Defined in | Key | Stores | Reused across |
+|-------|------------|-----|--------|---------------|
+| `$ruleBranchCache` | [Find-Subset.ps1:494](../SqlSizer-MSSQL/Public/Find-Subset.ps1#L494) | `"{Direction}\|{CurrentState}\|{SrcSchema}\|{SrcTable}\|{FkName}"` | Output of `Get-TraversalRuleBranches` (the rule-evaluation result for one FK) | Repeated calls with the same FK + state + direction |
+| `$cteQueryTemplateCache` | [Find-Subset.ps1:495](../SqlSizer-MSSQL/Public/Find-Subset.ps1#L495) | `"{FkId}\|{Direction}\|{NewState}\|{ConstraintsKey}"` | One per-FK CTE template with `/*__SQLSIZER_ITER__*/` token instead of the iteration literal | All iterations once first computed |
+| `$traversalQueryCache` | [Find-Subset.ps1:501](../SqlSizer-MSSQL/Public/Find-Subset.ps1#L501) | `"{Schema}\|{Table}\|{Direction}\|{State}"` | The full **joined** SQL across all FKs of a `(Table, Direction, State)` tuple, token still embedded | All iterations of the same tuple — the dominant win |
+
+**Why three tiers?** Each layer targets a different reuse pattern. The bottom one (`$ruleBranchCache`) is hit on cold misses while building per-FK templates. The middle one (`$cteQueryTemplateCache`) is hit when the same FK appears under different operation states. The top one (`$traversalQueryCache`) collapses an entire `(Table, Direction, State)` rebuild into a single hashtable lookup + one `String.Replace` of the iteration token.
+
+#### The iteration-token substitution
+
+Within a single `Find-Subset` run, the only iteration-dependent literal in a generated CTE is the `Iteration` value injected at three places — the INSERT into the target processing table (`FoundIteration` column), the UPDATE existing rows (`Iteration` column), and the INSERT into `SqlSizer.Operations` (`FoundIteration` column).
+
+Caching exploits this: `New-CTETraversalQuery` accepts an `-IterationLiteral` parameter; when set, it substitutes the given string everywhere `$Iteration` would normally interpolate. Find-Subset passes `/*__SQLSIZER_ITER__*/` (a SQL block-comment token, syntactically inert if accidentally left in place) so the cached template is iteration-agnostic. On reuse, a single `template.Replace('/*__SQLSIZER_ITER__*/', '<iter>')` rehydrates the template — **~0.3 ms** for a multi-KB cached SQL string.
+
+A defensive assertion at the cache-hit site throws `Iteration token '/*__SQLSIZER_ITER__*/' was not substituted in cached CTE query` if a token survives the substitution, so cache bugs fail fast rather than silently producing wrong SQL.
+
+#### Cache hit/miss diagnostics
+
+Cache statistics are surfaced both via `Write-Verbose` and on the result object:
+
+```powershell
+$result = Find-Subset -Database $db -SessionId $sid -DatabaseInfo $info `
+    -ConnectionInfo $conn -Verbose
+
+# VERBOSE: Traversal cache: 142 hits (87.7%), 20 misses; avg hit 0.31 ms,
+#          avg miss 138.2 ms; total hit time 44 ms, total miss time 2764 ms
+
+$result.TraversalCacheStats
+# Hits          : 142
+# Misses        : 20
+# HitElapsedMs  : 43.7
+# MissElapsedMs : 2763.9
 ```
-Cache Key Format: "{SchemaName}_{TableName}_{StateInt}_{OUT|IN}"
 
-Example: "Sales_Customer_1_OUT" → cached CTE for Customer outgoing FKs with Include state
-```
+A high `Hits` percentage with low `avg hit ms` confirms the cache is doing its job. A high `Misses` count with large `avg miss ms` indicates many distinct `(Table, Direction, State)` tuples that each pay the cold-build cost once — typically the first iteration over each operation tuple.
 
-The cache is keyed by table + state + direction because the generated SQL is identical across iterations—only the `Iteration` column in `SourceRecords` CTE changes, and that's handled by the `WHERE src.Iteration IN (...)` clause.
+#### Find-RemovalSubset
 
-For `Find-RemovalSubset`, the cache uses `##DEPTH##` and `##ITERATION##` placeholders that are string-replaced at execution time.
+For `Find-RemovalSubset`, the cache uses `##DEPTH##` and `##ITERATION##` placeholders that are string-replaced at execution time. (Same idea, different placeholder convention.)
 
 ### Cycle Safety
 
@@ -1834,9 +2040,13 @@ The internal `Invoke-SqlcmdEx` function handles Azure transparently:
 | Optimization | Description |
 |--------------|-------------|
 | **CTE-based queries** | Better query plan optimization by SQL Server |
-| **Batch processing** | Configurable `MaxBatchSize` for controlled resource usage |
+| **Per-row batch processing** (`MaxBatchSize`) | Splits a single oversized operation across multiple SQL statements |
+| **Per-iteration operation batching** (`OperationBatchSize`) | Combines K independent operations into 4 round-trips per iteration (default K=8) |
 | **Batched FK queries** | Multiple FK relationships processed in single SQL execution |
+| **Three-tier query cache** | `$ruleBranchCache` + `$cteQueryTemplateCache` + `$traversalQueryCache` collapse repeat-build cost to a single hashtable lookup + token Replace once warm |
+| **Iteration-token substitution** | Cached templates carry `/*__SQLSIZER_ITER__*/` placeholders; Replace at use is ~0.3 ms regardless of template size |
 | **Indexed processing tables** | Key columns + State (or Depth) indexed for fast lookups |
+| **Indexed `SqlSizer.ForeignKeys`** | `IX_ForeignKeys_FkTableId` and `IX_ForeignKeys_TableId` cover metadata lookups; created automatically by `Install-SqlSizer` |
 | **Iteration-based filtering** | SourceRecords CTE only reads current iteration's rows |
 
 ### Best Practices

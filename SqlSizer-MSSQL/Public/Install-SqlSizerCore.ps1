@@ -63,6 +63,12 @@ function Install-SqlSizerCore
     $tmp = "CREATE TABLE SqlSizer.ForeignKeys(Id bigint identity(1,1) $pk, [FkTableId] bigint, [TableId] bigint, [Name] varchar(256))"
     $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
 
+    $tmp = "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ForeignKeys_FkTableId' AND object_id = OBJECT_ID('SqlSizer.ForeignKeys')) CREATE NONCLUSTERED INDEX [IX_ForeignKeys_FkTableId] ON SqlSizer.ForeignKeys ([FkTableId]) INCLUDE ([TableId], [Name])"
+    $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
+    $tmp = "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ForeignKeys_TableId' AND object_id = OBJECT_ID('SqlSizer.ForeignKeys')) CREATE NONCLUSTERED INDEX [IX_ForeignKeys_TableId] ON SqlSizer.ForeignKeys ([TableId]) INCLUDE ([FkTableId], [Name])"
+    $null = Invoke-SqlcmdEx -Sql $tmp -Database $Database -ConnectionInfo $ConnectionInfo -Statistics $false
+
     foreach ($table in $DatabaseInfo.Tables)
     {
         $schemaEsc = $table.SchemaName.Replace("'", "''")

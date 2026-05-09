@@ -573,6 +573,128 @@ END
     }
 }
 
+function New-GetNextOperationsBatchQuery
+{
+    <#
+    .SYNOPSIS
+        Builds query to fetch the top K operations to process per iteration.
+    .DESCRIPTION
+        Identical shape to New-GetNextOperationQuery but returns TOP $BatchSize
+        rows instead of TOP 1. Used to amortize the round-trip cost of the
+        Get/Mark/Traverse/Complete cycle across multiple operations.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]$SessionId,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$UseDfs,
+
+        [Parameter(Mandatory = $true)]
+        [int]$BatchSize
+    )
+
+    if ($BatchSize -lt 1)
+    {
+        throw "BatchSize must be >= 1 (got $BatchSize)."
+    }
+
+    $sessionIdLiteral = ConvertTo-SqlStringLiteral $SessionId
+
+    if ($UseDfs)
+    {
+        return @"
+SELECT TOP $BatchSize
+    o.[Table] AS TableId,
+    t.[Schema] AS TableSchema,
+    t.TableName,
+    o.[State] AS State,
+    o.Depth,
+    SUM(o.ToProcess - o.Processed) AS RemainingRecords
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.Status IS NULL
+    AND o.SessionId = $sessionIdLiteral
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
+ORDER BY RemainingRecords DESC
+"@
+    }
+    else
+    {
+        return @"
+SELECT TOP $BatchSize
+    o.[Table] AS TableId,
+    t.[Schema] AS TableSchema,
+    t.TableName,
+    o.[State] AS State,
+    o.Depth,
+    SUM(o.ToProcess - o.Processed) AS RemainingRecords
+FROM SqlSizer.Operations o
+INNER JOIN SqlSizer.Tables t ON o.[Table] = t.Id
+WHERE o.Status IS NULL
+    AND o.SessionId = $sessionIdLiteral
+GROUP BY o.[Table], t.[Schema], t.TableName, o.[State], o.Depth
+ORDER BY o.Depth ASC, RemainingRecords DESC
+"@
+    }
+}
+
+function New-MarkOperationsBatchInProgressQuery
+{
+    <#
+    .SYNOPSIS
+        Builds a single SQL batch that marks K operations as in-progress
+        in one round-trip.
+    .DESCRIPTION
+        For each (TableId, State, Depth) tuple supplied in $Operations, emits
+        the same per-operation MARK SQL produced by New-MarkOperationInProgressQuery
+        (preserving its MaxBatchSize semantics, including the in-SQL WHILE loop
+        when MaxBatchSize > 0). All emitted statements are concatenated into one
+        batch so the entire MARK phase is a single round-trip regardless of K.
+
+        $Operations is an array of hashtables/PSObjects with fields:
+            TableId : long
+            State   : int
+            Depth   : int
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Operations,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SessionId,
+
+        [Parameter(Mandatory = $true)]
+        [int]$MaxBatchSize
+    )
+
+    if ($null -eq $Operations -or $Operations.Count -eq 0)
+    {
+        return ""
+    }
+
+    $sb = [System.Text.StringBuilder]::new()
+    foreach ($op in $Operations)
+    {
+        $perOp = New-MarkOperationInProgressQuery `
+            -TableId ([long]$op.TableId) `
+            -State ([int]$op.State) `
+            -Depth ([int]$op.Depth) `
+            -SessionId $SessionId `
+            -MaxBatchSize $MaxBatchSize
+        [void]$sb.AppendLine($perOp)
+        [void]$sb.AppendLine(";")
+    }
+    return $sb.ToString()
+}
+
 function New-CompleteOperationsQuery
 {
     <#
@@ -648,7 +770,9 @@ Export-ModuleMember -Function @(
     'New-CTETraversalQuery',
     'New-ExcludePendingQuery',
     'New-GetNextOperationQuery',
+    'New-GetNextOperationsBatchQuery',
     'New-MarkOperationInProgressQuery',
+    'New-MarkOperationsBatchInProgressQuery',
     'New-CompleteOperationsQuery',
     'New-GetIterationStatisticsQuery'
 )
