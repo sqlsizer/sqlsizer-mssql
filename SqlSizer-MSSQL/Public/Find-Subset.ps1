@@ -437,9 +437,6 @@ function Find-Subset
         [int]$ProgressRefreshInterval = 5,
 
         [Parameter(Mandatory = $false)]
-        [int]$OperationBatchSize = 8,
-
-        [Parameter(Mandatory = $false)]
         [switch]$Resume
     )
 
@@ -461,11 +458,6 @@ function Find-Subset
     if ($ProgressRefreshInterval -lt 1)
     {
         throw "ProgressRefreshInterval must be greater than or equal to 1."
-    }
-
-    if ($OperationBatchSize -lt 1)
-    {
-        throw "OperationBatchSize must be greater than or equal to 1."
     }
 
     $performanceSamples = [System.Collections.Generic.List[object]]::new()
@@ -1177,169 +1169,11 @@ function Find-Subset
         return $stats
     }
 
-    function Get-NextOperationsBatch
-    {
-        <#
-        .SYNOPSIS
-            Fetches up to $BatchSize next operations to process in one round-trip.
-        #>
-        param
-        (
-            [bool]$UseDfs,
-
-            [int]$BatchSize,
-
-            [int]$Iteration
-        )
-
-        $query = New-GetNextOperationsBatchQuery -SessionId $SessionId -UseDfs $UseDfs -BatchSize $BatchSize
-
-        $rows = Invoke-FindSubsetSql -Sql $query -Phase "Selecting next operations batch" -Iteration $Iteration
-
-        if ($null -eq $rows)
-        {
-            return @()
-        }
-
-        # Invoke-Sqlcmd returns a single object for one row, or an array for many.
-        $rowList = @($rows)
-
-        $result = New-Object 'System.Collections.Generic.List[TraversalOperation]'
-        foreach ($row in $rowList)
-        {
-            if ($null -eq $row) { continue }
-            $op = [TraversalOperation]::new()
-            $op.TableId = $row.TableId
-            $op.TableSchema = $row.TableSchema
-            $op.TableName = $row.TableName
-            $op.State = [TraversalState]$row.State
-            $op.Depth = $row.Depth
-            $op.RecordsToProcess = $row.RemainingRecords
-            $op.RecordsProcessed = 0
-            $null = $result.Add($op)
-        }
-
-        return ,$result.ToArray()
-    }
-
-    function Set-OperationsBatchInProgress
-    {
-        <#
-        .SYNOPSIS
-            Marks all operations in the batch as in-progress in a single round-trip.
-        #>
-        param
-        (
-            [TraversalOperation[]]$Operations,
-
-            [int]$Iteration
-        )
-
-        if ($null -eq $Operations -or $Operations.Count -eq 0)
-        {
-            return
-        }
-
-        $opSpecs = foreach ($op in $Operations) {
-            [pscustomobject]@{
-                TableId = [long]$op.TableId
-                State   = [int]$op.State
-                Depth   = [int]$op.Depth
-            }
-        }
-        $opSpecs = @($opSpecs)
-
-        $query = New-MarkOperationsBatchInProgressQuery `
-            -Operations $opSpecs `
-            -SessionId $SessionId `
-            -MaxBatchSize $MaxBatchSize
-
-        if ([string]::IsNullOrWhiteSpace($query)) { return }
-
-        $null = Invoke-FindSubsetSql -Sql $query -Phase "Marking $($Operations.Count) operations in progress" -Iteration $Iteration
-    }
-
-    function Invoke-TraversalOperationsBatch
-    {
-        <#
-        .SYNOPSIS
-            Builds traversal SQL for every operation in the batch and executes
-            it in a single round-trip.
-        .DESCRIPTION
-            Reuses the table-level cached templates inside New-TraversalQuery,
-            then concatenates outgoing+incoming SQL across all operations into
-            one batched execution. Statements run sequentially within the batch,
-            so cross-operation NOT EXISTS checks see prior operations' inserts.
-        #>
-        param
-        (
-            [TraversalOperation[]]$Operations,
-            [int]$Iteration
-        )
-
-        if ($null -eq $Operations -or $Operations.Count -eq 0)
-        {
-            return
-        }
-
-        $batchedQueries = [System.Collections.Generic.List[string]]::new()
-        $lastTable = $null
-        $lastOperation = $null
-
-        foreach ($operation in $Operations)
-        {
-            $table = $tablesByFullName["$($operation.TableSchema), $($operation.TableName)"]
-            $lastTable = $table
-            $lastOperation = $operation
-
-            $traverseOutgoing = Test-ShouldTraverseDirection -State $operation.State -Direction ([TraversalDirection]::Outgoing) -FullSearch $FullSearch
-            $traverseIncoming = Test-ShouldTraverseDirection -State $operation.State -Direction ([TraversalDirection]::Incoming) -FullSearch $FullSearch
-
-            if ($traverseOutgoing)
-            {
-                $query = New-TraversalQuery `
-                    -Table $table `
-                    -State $operation.State `
-                    -Direction ([TraversalDirection]::Outgoing) `
-                    -TraversalConfiguration $TraversalConfiguration `
-                    -Operation $operation `
-                    -Iteration $Iteration
-                if ($query -ne "") { $batchedQueries.Add($query) }
-            }
-
-            if ($traverseIncoming)
-            {
-                $query = New-TraversalQuery `
-                    -Table $table `
-                    -State $operation.State `
-                    -Direction ([TraversalDirection]::Incoming) `
-                    -TraversalConfiguration $TraversalConfiguration `
-                    -Operation $operation `
-                    -Iteration $Iteration
-                if ($query -ne "") { $batchedQueries.Add($query) }
-            }
-        }
-
-        if ($batchedQueries.Count -gt 0)
-        {
-            $batchedSql = $batchedQueries -join "`n"
-            $phase = "Executing traversal SQL ($($Operations.Count) ops, $($batchedQueries.Count) batches)"
-            $null = Invoke-FindSubsetSql -Sql $batchedSql -Phase $phase -Iteration $Iteration -Operation $lastOperation -Table $lastTable
-        }
-    }
-
     function Invoke-SearchIteration
     {
         <#
         .SYNOPSIS
             Executes one iteration of the search algorithm.
-        .DESCRIPTION
-            Fetches up to $OperationBatchSize ready-to-process operation groups
-            in a single Get-Next round-trip, marks them all in-progress in one
-            round-trip, executes their concatenated traversal SQL in one round-trip,
-            and finally calls the session-wide Complete-Operations once. This
-            collapses the per-operation 4-round-trip overhead into ~4 round-trips
-            for K operations (K-fold reduction in SQL chatter).
         .RETURNS
             $true if more work remains, $false if complete.
         #>
@@ -1348,18 +1182,22 @@ function Find-Subset
             [int]$Iteration
         )
 
-        $operations = Get-NextOperationsBatch -UseDfs $UseDfs -BatchSize $OperationBatchSize -Iteration $Iteration
+        # Get next operation
+        $operation = Get-NextOperation -UseDfs $UseDfs -Iteration $Iteration
 
-        if ($null -eq $operations -or $operations.Count -eq 0)
+        if ($null -eq $operation)
         {
             Write-Verbose "No more operations to process"
             return $false
         }
 
-        Set-OperationsBatchInProgress -Operations $operations -Iteration $Iteration
+        # Mark as in-progress
+        Set-OperationInProgress -Operation $operation -Iteration $Iteration
 
-        Invoke-TraversalOperationsBatch -Operations $operations -Iteration $Iteration
+        # Execute traversal
+        Invoke-TraversalOperation -Operation $operation -Iteration $Iteration
 
+        # Complete operations
         Complete-Operations -Iteration $Iteration
 
         return $true
