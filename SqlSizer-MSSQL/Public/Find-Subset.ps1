@@ -498,6 +498,17 @@ function Find-Subset
     $traversalQueryCache = @{}
     $ITER_TOKEN = '/*__SQLSIZER_ITER__*/'
 
+    # Diagnostic counters for the table-level traversal cache. Emitted via
+    # Write-Verbose at end of Find-Subset and surfaced on the result object
+    # so callers can verify the cache is actually being hit without enabling
+    # the full performance profile.
+    $traversalCacheStats = [ordered]@{
+        Hits          = [long]0
+        Misses        = [long]0
+        HitElapsedMs  = [double]0
+        MissElapsedMs = [double]0
+    }
+
     #region Helper Functions
 
     function Test-FindSubsetIgnoredTable
@@ -683,13 +694,29 @@ function Find-Subset
             $profile = ConvertTo-FindSubsetPerformanceProfile -Samples $performanceSamples.ToArray()
         }
 
-        return New-FindSubsetResultObject `
+        $totalCalls = $traversalCacheStats.Hits + $traversalCacheStats.Misses
+        if ($totalCalls -gt 0)
+        {
+            $hitPct = [Math]::Round(100 * $traversalCacheStats.Hits / $totalCalls, 1)
+            $avgHitMs  = if ($traversalCacheStats.Hits -gt 0)   { [Math]::Round($traversalCacheStats.HitElapsedMs / $traversalCacheStats.Hits, 3) } else { 0 }
+            $avgMissMs = if ($traversalCacheStats.Misses -gt 0) { [Math]::Round($traversalCacheStats.MissElapsedMs / $traversalCacheStats.Misses, 2) } else { 0 }
+            Write-Verbose ("Traversal cache: {0} hits ({1}%), {2} misses; avg hit {3} ms, avg miss {4} ms; total hit time {5} ms, total miss time {6} ms" -f `
+                $traversalCacheStats.Hits, $hitPct, $traversalCacheStats.Misses, `
+                $avgHitMs, $avgMissMs, `
+                [Math]::Round($traversalCacheStats.HitElapsedMs, 1), [Math]::Round($traversalCacheStats.MissElapsedMs, 1))
+        }
+
+        $result = New-FindSubsetResultObject `
             -Finished $Finished `
             -Initialized $Initialized `
             -CompletedIterations $CompletedIterations `
             -SubsetSizeGuard $SubsetSizeGuard `
             -IncludePerformanceProfile $CollectPerformanceProfile `
             -PerformanceProfile $profile
+
+        # Attach cache diagnostics so callers can inspect without -Verbose.
+        $result | Add-Member -NotePropertyName TraversalCacheStats -NotePropertyValue ([pscustomobject]$traversalCacheStats) -Force
+        return $result
     }
 
     function New-TraversalQuery
@@ -737,6 +764,8 @@ function Find-Subset
             finally
             {
                 $buildWatch.Stop()
+                $traversalCacheStats.Hits += 1
+                $traversalCacheStats.HitElapsedMs += $buildWatch.Elapsed.TotalMilliseconds
                 Add-FindSubsetPerformanceSample `
                     -Category 'PowerShell' `
                     -Phase "Building $directionText traversal SQL (cache hit)" `
@@ -885,6 +914,8 @@ function Find-Subset
         finally
         {
             $buildWatch.Stop()
+            $traversalCacheStats.Misses += 1
+            $traversalCacheStats.MissElapsedMs += $buildWatch.Elapsed.TotalMilliseconds
             Add-FindSubsetPerformanceSample `
                 -Category 'PowerShell' `
                 -Phase "Building $directionText traversal SQL" `
